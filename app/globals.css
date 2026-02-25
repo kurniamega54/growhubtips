@@ -1,0 +1,148 @@
+@import "tailwindcss";
+
+@theme {
+  /* Primary - Forest Green */
+  --color-primary-50: #f3f8f4;
+  --color-primary-100: #e0f0e3;
+  --color-primary-200: #b8ddb9;
+  --color-primary-300: #8fc98f;
+  --color-primary-400: #5fa85f;
+  --color-primary-500: #2D5A27;
+  --color-primary-600: #254a20;
+  --color-primary-700: #1d3919;
+  --color-primary-800: #142912;
+  --color-primary-900: #0b180b;
+  --color-primary-950: #061006;
+  --color-primary-300: #8fc98f;
+  /* Secondary - Sage */
+  --color-secondary-400: #8E9775;
+  --color-secondary-500: #7a8a67;
+  /* Accent - Terracotta */
+  --color-accent-500: #D96C32;
+  --color-accent-600: #b85a28;
+  /* Neutral */
+  --color-neutral-500: #4E342E;
+  /* Font & Radius */
+  --font-heading: "Playfair Display", ui-serif, Georgia, serif;
+  --radius-organic: 1.1rem 1.7rem 1.3rem 1.5rem / 1.5rem 1.2rem 1.7rem 1.1rem;
+  --shadow-organic: 0 4px 32px 0 rgba(45, 90, 39, 0.1), 0 1.5px 6px 0 rgba(142, 151, 117, 0.08);
+}
+
+:root {
+  --background: #F9F9F9;
+  --foreground: #2D5A27;
+  --forest-green: #2D5A27;
+  --sage-green: #8E9775;
+  --earthy-brown: #4E342E;
+  --off-white: #F9F9F9;
+}
+
+body {
+  background: var(--off-white);
+  color: var(--forest-green);
+  font-family: var(--font-sans), "Plus Jakarta Sans", "Inter", Arial, Helvetica, sans-serif;
+}
+ :root {
+  --background: #F5F7F2;
+  --foreground: #254a20;
+  --forest-green: #254a20;
+  --sage-green: #8E9775;
+  --earthy-brown: #4E342E;
+  --off-white: #FFFFFF;
+}
+
+body {
+  background: var(--off-white);
+  color: var(--forest-green);
+  font-family: var(--font-sans), "Plus Jakarta Sans", "Inter", Arial, Helvetica, sans-serif;
+  font-size: 16px;
+}
+
+.ProseMirror {
+  min-height: 500px;
+  font-family: "Plus Jakarta Sans", var(--font-sans), "Inter", Arial, Helvetica, sans-serif;
+  line-height: 1.7;
+  font-size: 1.05rem;
+}
+
+.ProseMirror > * + * {
+  margin-top: 1rem;
+}
+
+.footer-bg {
+  background: var(--forest-green);
+  color: #fff;
+}
+
+.footer-badge {
+  background: #fff;
+  color: var(--forest-green);
+  border-radius: 12px;
+  padding: 0.5em 1em;
+  font-weight: 600;
+  box-shadow: 0 2px 8px 0 rgba(45,90,39,0.08);
+}
+
+/* Table Styles */
+.ProseMirror table {
+  border-collapse: collapse;
+  margin: 2rem 0;
+  width: 100%;
+  border: 1px solid #e0e0e0;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(45, 90, 39, 0.05);
+}
+
+.ProseMirror th {
+  background-color: #D96C32;
+  color: white;
+  padding: 1rem;
+  text-align: left;
+  font-weight: 600;
+  border: 1px solid #b85a28;
+}
+
+.ProseMirror td {
+  border: 1px solid #e0e0e0;
+  padding: 1rem;
+  vertical-align: top;
+}
+
+.ProseMirror tr:nth-child(even) td {
+  background-color: #f3f8f4;
+}
+
+.ProseMirror tr:nth-child(odd) td {
+  background-color: #fafbf9;
+}
+
+.ProseMirror tr:first-child td {
+  background-color: #D96C32 !important;
+  color: white;
+  font-weight: 600;
+}
+
+.ProseMirror tbody tr:hover td {
+  background-color: #e8f0e6 !important;
+}
+
+.ProseMirror .selectedCell {
+  background-color: #8E977533;
+}
+
+/* Table cell text alignment */
+.ProseMirror td[data-text-align="center"],
+.ProseMirror th[data-text-align="center"] {
+  text-align: center;
+}
+
+.ProseMirror td[data-text-align="right"],
+.ProseMirror th[data-text-align="right"] {
+  text-align: right;
+}
+
+.ProseMirror td[data-text-align="left"],
+.ProseMirror th[data-text-align="left"] {
+  text-align: left;
+}
