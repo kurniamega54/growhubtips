@@ -7,13 +7,15 @@ import { CommandPalette } from "./CommandPalette";
 import { MobileMenu } from "./MobileMenu";
 import { ActiveLink } from "./ActiveLink";
 
-const navLinks = [
-  { href: "/", label: "Home" },
-  { href: "/plants", label: "Plants" },
-  { href: "/vegetables", label: "Vegetables" },
-  { href: "/troubleshooting", label: "Troubleshooting" },
-  { href: "/about", label: "About" },
-];
+interface CategoryLink {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+// start with home link; category links will be loaded dynamically
+const baseLinks = [{ href: "/", label: "Home" }];
+
 
 export function Navbar() {
   const [showMenu, setShowMenu] = useState(false);
@@ -21,6 +23,15 @@ export function Navbar() {
   const scrollDir = useScrollDirection();
   const [scrolled, setScrolled] = useState(false);
   const controls = useAnimation();
+
+  const [categories, setCategories] = useState<CategoryLink[]>([]);
+
+  useEffect(() => {
+    fetch("/api/categories")
+      .then((r) => r.json())
+      .then((d) => setCategories(d.categories || []))
+      .catch(() => setCategories([]));
+  }, []);
 
   // Show/hide navbar on scroll
   useEffect(() => {
@@ -69,7 +80,9 @@ export function Navbar() {
 
         {/* Desktop Nav */}
         <div className="hidden md:flex items-center gap-6">
-          {navLinks.map((link) => (
+          {baseLinks.concat(
+            categories.map((c) => ({ href: `/category/${c.slug}`, label: c.name }))
+          ).map((link) => (
             <ActiveLink key={link.href} href={link.href}>{link.label}</ActiveLink>
           ))}
           {/* Search Bar */}

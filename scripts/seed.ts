@@ -18,6 +18,11 @@ import {
   seoMetadata,
   plantProfiles,
   mediaLibrary,
+  pageContent,
+  timelineEvents,
+  teamMembers,
+  officeHours,
+  faqItems,
 } from "../lib/db/schema";
 
 async function seed() {
@@ -197,6 +202,183 @@ async function seed() {
       { postId: post.id, tagId: petTag.id },
     ]);
     console.log("✓ Post-tag links created");
+  }
+
+  // 10. Create enterprise pages (About, Contact, Privacy, Affiliate)
+  const pagesData = [
+    {
+      slug: "about",
+      title: "About GrowHubTips",
+      metaDescription: "Learn about GrowHubTips and how we empower gardening enthusiasts with professional knowledge and tools",
+      heroTitle: "About GrowHubTips",
+      heroSubtitle: "Empowering gardeners with expert knowledge and professional tools",
+      status: "published" as const,
+      createdBy: user.id,
+    },
+    {
+      slug: "contact",
+      title: "Contact Us",
+      metaDescription: "Get in touch with GrowHubTips for expert advice, partnerships, or general inquiries",
+      heroTitle: "Contact Our Experts",
+      heroSubtitle: "We're here to help with any gardening questions",
+      status: "published" as const,
+      createdBy: user.id,
+    },
+    {
+      slug: "privacy",
+      title: "Privacy Policy",
+      metaDescription: "GrowHubTips privacy policy - Learn how we protect your data",
+      heroTitle: "Privacy Policy",
+      heroSubtitle: "Your trust and data privacy matter to us",
+      status: "published" as const,
+      createdBy: user.id,
+    },
+    {
+      slug: "affiliate",
+      title: "Affiliate Program",
+      metaDescription: "Join our affiliate program and earn commissions by promoting GrowHubTips",
+      heroTitle: "Grow With Us - Affiliate Program",
+      heroSubtitle: "Earn attractive commissions by partnering with GrowHubTips",
+      status: "published" as const,
+      createdBy: user.id,
+    },
+  ];
+
+  const createdPages = await db.insert(pageContent).values(pagesData).returning();
+  console.log(`✓ ${createdPages.length} enterprise pages created`);
+
+  // 11. Add timeline events for About page
+  const aboutPage = createdPages.find((p) => p.slug === "about");
+  if (aboutPage) {
+    await db.insert(timelineEvents).values([
+      {
+        pageId: aboutPage.id,
+        year: 2020,
+        month: 3,
+        title: "GrowHubTips Founded",
+        description: "Started with a mission to make gardening accessible to everyone",
+        icon: "sprout",
+        sortOrder: 1,
+      },
+      {
+        pageId: aboutPage.id,
+        year: 2021,
+        month: 6,
+        title: "Community Reaches 10K Members",
+        description: "Our community of gardening enthusiasts surpassed 10,000 members",
+        icon: "users",
+        sortOrder: 2,
+      },
+      {
+        pageId: aboutPage.id,
+        year: 2022,
+        month: 9,
+        title: "Plant Clinic Launched",
+        description: "Launched dedicated plant health diagnosis and expert consultation service",
+        icon: "heart-handshake",
+        sortOrder: 3,
+      },
+      {
+        pageId: aboutPage.id,
+        year: 2023,
+        month: 12,
+        title: "Premium Courses Released",
+        description: "Released comprehensive gardening courses with expert certifications",
+        icon: "book-open",
+        sortOrder: 4,
+      },
+      {
+        pageId: aboutPage.id,
+        year: 2024,
+        month: 6,
+        title: "50K+ Active Users",
+        description: "Celebrating 50,000+ active users helping each other grow",
+        icon: "trophy",
+        sortOrder: 5,
+      },
+    ]);
+    console.log("✓ Timeline events created");
+
+    // Add team members
+    await db.insert(teamMembers).values([
+      {
+        pageId: aboutPage.id,
+        name: "Sarah Chen",
+        role: "Founder & CEO",
+        bio: "Certified horticulturist with 15+ years of experience in urban gardening",
+        credentials: "MS Horticulture, Royal Horticultural Society Member",
+        expertise: ["Urban Gardening", "Sustainable Agriculture", "Plant Health"],
+        sortOrder: 1,
+        authorId: author.id,
+      },
+      {
+        pageId: aboutPage.id,
+        name: "David Rodriguez",
+        role: "Head of Plant Science",
+        bio: "PhD in Plant Physiology with focus on indoor cultivation techniques",
+        credentials: "PhD Plant Physiology, Published Researcher",
+        expertise: ["Plant Physiology", "Indoor Gardening", "Hydroponics"],
+        sortOrder: 2,
+      },
+      {
+        pageId: aboutPage.id,
+        name: "Emma Wilson",
+        role: "Community Manager",
+        bio: "Passionate about connecting gardeners and sharing best practices",
+        credentials: "BS Botany, Community Leadership Certification",
+        expertise: ["Community Building", "Garden Design", "Sustainability"],
+        sortOrder: 3,
+      },
+    ]);
+    console.log("✓ Team members created");
+  }
+
+  // 12. Add office hours for Contact page
+  const contactPage = createdPages.find((p) => p.slug === "contact");
+  if (contactPage) {
+    await db.insert(officeHours).values([
+      { dayOfWeek: 1, startTime: "09:00", endTime: "17:00", isOpen: true, timezone: "UTC" },
+      { dayOfWeek: 2, startTime: "09:00", endTime: "17:00", isOpen: true, timezone: "UTC" },
+      { dayOfWeek: 3, startTime: "09:00", endTime: "17:00", isOpen: true, timezone: "UTC" },
+      { dayOfWeek: 4, startTime: "09:00", endTime: "17:00", isOpen: true, timezone: "UTC" },
+      { dayOfWeek: 5, startTime: "09:00", endTime: "17:00", isOpen: true, timezone: "UTC" },
+      { dayOfWeek: 6, startTime: "10:00", endTime: "15:00", isOpen: true, timezone: "UTC" },
+      { dayOfWeek: 7, startTime: "00:00", endTime: "00:00", isOpen: false, timezone: "UTC" },
+    ]);
+    console.log("✓ Office hours created");
+
+    // Add FAQ items
+    await db.insert(faqItems).values([
+      {
+        pageId: contactPage.id,
+        question: "How long does it take to get a response?",
+        answer: "We typically respond within 24-48 hours during business days. For urgent matters, please indicate priority in your message.",
+        category: "Support",
+        sortOrder: 1,
+      },
+      {
+        pageId: contactPage.id,
+        question: "Do you offer plant consultations?",
+        answer: "Yes! Our expert team offers personalized plant consultations. Use our Plant Clinic service or contact us directly for scheduling.",
+        category: "Services",
+        sortOrder: 2,
+      },
+      {
+        pageId: contactPage.id,
+        question: "Can I schedule a video consultation?",
+        answer: "Absolutely! We offer video consultations for plant health assessments and personalized gardening advice. Contact us to book a session.",
+        category: "Services",
+        sortOrder: 3,
+      },
+      {
+        pageId: contactPage.id,
+        question: "What's the best way to reach you?",
+        answer: "You can reach us through this contact form, email, or our Plant Clinic service. For faster response, email is preferred during office hours.",
+        category: "Support",
+        sortOrder: 4,
+      },
+    ]);
+    console.log("✓ FAQ items created");
   }
 
   console.log("\n✅ Seed completed successfully!");

@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import AdminSidebar from "./AdminSidebar";
 import AdminHeader from "./AdminHeader";
 import { EditorProvider } from "./EditorContext";
+import SeoSidebarContainer from "./SeoSidebarContainer";
 
 export default function AdminShell({ children }: { children: ReactNode }) {
   return (
@@ -16,8 +17,8 @@ export default function AdminShell({ children }: { children: ReactNode }) {
             {children}
           </main>
         </div>
-        <aside className="col-start-3 row-span-2 bg-white border-l border-gray-100 shadow-organic flex flex-col">
-          {/* SEO Sidebar will be rendered here via context */}
+        <aside className="col-start-3 row-span-2 bg-white border-l border-gray-100 shadow-organic flex flex-col overflow-y-auto">
+          <SeoSidebarContainer />
         </aside>
       </div>
     </EditorProvider>

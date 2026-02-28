@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { posts, categories, authors, seoMetadata } from "@/lib/db/schema";
-import { eq, desc, sql } from "drizzle-orm";
+import { eq, desc, sql, and, ne } from "drizzle-orm";
 
 export async function getPublishedPosts(limit = 10) {
   try {
@@ -81,3 +81,70 @@ export async function getAllPosts() {
     return [];
   }
 }
+
+// -----------------------------------------------------------------------------
+// CATEGORY helpers
+// -----------------------------------------------------------------------------
+
+export async function getActiveCategories() {
+  try {
+    return await db
+      .select({
+        id: categories.id,
+        name: categories.name,
+        slug: categories.slug,
+      })
+      .from(categories)
+      .orderBy(categories.sortOrder);
+  } catch {
+    return [];
+  }
+}
+
+export async function getPostsByCategorySlug(slug: string) {
+  try {
+    return await db
+      .select({
+        id: posts.id,
+        title: posts.title,
+        slug: posts.slug,
+        excerpt: posts.excerpt,
+        publishedAt: posts.publishedAt,
+        categoryName: categories.name,
+        categorySlug: categories.slug,
+      })
+      .from(posts)
+      .leftJoin(categories, eq(posts.categoryId, categories.id))
+      .where(
+        and(eq(posts.status, "published"), eq(categories.slug, slug))
+      )
+      .orderBy(desc(posts.publishedAt));
+  } catch {
+    return [];
+  }
+}
+
+export async function getRelatedPosts(currentPostId: string, categoryId: string) {
+  try {
+    return await db
+      .select({
+        id: posts.id,
+        title: posts.title,
+        slug: posts.slug,
+        excerpt: posts.excerpt,
+      })
+      .from(posts)
+      .where(
+        and(
+          eq(posts.status, "published"),
+          eq(posts.categoryId, categoryId),
+          ne(posts.id, currentPostId)
+        )
+      )
+      .orderBy(desc(posts.publishedAt))
+      .limit(3);
+  } catch {
+    return [];
+  }
+}
+

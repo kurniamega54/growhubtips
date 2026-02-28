@@ -7,6 +7,9 @@ import { autoSavePostAction, createPostAction } from "../actions";
 import { useActionState, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { Editor, type EditorJson } from "./Editor";
 import { SeoSidebar } from "./SeoSidebar";
+import MediaPicker from "../components/MediaPicker";
+import { Image as ImgIcon } from "lucide-react";
+import Image from "next/image";
 
 function slugify(s: string) {
   return s
@@ -19,8 +22,10 @@ function slugify(s: string) {
 
 export function NewPostForm({
   categories,
+  onSyncStatusChange,
 }: {
   categories: { id: string; name: string; slug: string }[];
+  onSyncStatusChange?: (status: "idle" | "saving" | "saved") => void;
 }) {
   const [state, formAction, isPending] = useActionState(
     async (_prev: { error?: Record<string, string[]> } | null, formData: FormData) =>
@@ -44,6 +49,10 @@ export function NewPostForm({
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [isSaving, startSaving] = useTransition();
   const [seoScore, setSeoScore] = useState<number>(0);
+  const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
+  const [mediaPickerMode, setMediaPickerMode] = useState<"editor" | "featured">("editor");
+  const [mediaPickerCallback, setMediaPickerCallback] = useState<((url: string, alt: string) => void) | null>(null);
+  const [featuredImage, setFeaturedImage] = useState<{ id: string; url: string; alt: string } | null>(null);
   const dirtyRef = useRef(false);
 
   const title = watch("title");
@@ -70,6 +79,8 @@ export function NewPostForm({
       const values = getValues();
       if (!values.title || !values.slug) return;
 
+      onSyncStatusChange?.("saving");
+
       startSaving(async () => {
         const result = await autoSavePostAction({
           postId,
@@ -81,18 +92,24 @@ export function NewPostForm({
           seoTitle: values.seoTitle,
           metaDescription: values.metaDescription,
           seoScore,
+          featuredImageId: featuredImage?.id,
         });
 
         if (result?.postId) setPostId(result.postId);
         if (result?.lastSavedAt) {
           setLastSavedAt(new Date(result.lastSavedAt).toLocaleTimeString());
         }
-        if (!result?.error) dirtyRef.current = false;
+        if (!result?.error) {
+          dirtyRef.current = false;
+          onSyncStatusChange?.("saved");
+          // Reset to idle after 2 seconds
+          setTimeout(() => onSyncStatusChange?.("idle"), 2000);
+        }
       });
     }, 20000);
 
     return () => clearInterval(timer);
-  }, [contentJson, getValues, postId, startSaving, seoScore]);
+  }, [contentJson, getValues, postId, startSaving, seoScore, onSyncStatusChange, featuredImage]);
 
   const seoTitle = watch("seoTitle") ?? title ?? "";
   const metaDesc = watch("metaDescription") ?? "";
@@ -137,12 +154,59 @@ export function NewPostForm({
             value={contentJson}
             onChange={setContentJson}
             placeholder="Write your story with / to insert blocks..."
+            onOpenImagePicker={(callback) => {
+              setMediaPickerCallback(() => callback);
+              setMediaPickerMode("editor");
+              setMediaPickerOpen(true);
+            }}
           />
           {errors.content && <p className="text-red-600 text-sm mt-1">{errors.content.message}</p>}
           <input type="hidden" name="contentJson" value={contentJsonString} />
-        </div>
         <div>
-          <label className="block text-sm font-medium text-primary-700 mb-2">Category</label>
+          <label className="block text-sm font-medium text-primary-700 mb-2">Featured Image</label>
+          <div className="relative border-2 border-dashed border-primary-200 rounded-lg p-4 bg-primary-50">
+            {featuredImage ? (
+              <div className="space-y-3">
+                <div className="relative w-full h-48">
+                  <Image
+                    src={featuredImage.url}
+                    alt={featuredImage.alt}
+                    fill
+                    style={{ objectFit: "cover" }}
+                    className="rounded"
+                  />
+                </div>
+                <div className="text-sm text-gray-600">{featuredImage.alt}</div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMediaPickerMode("featured");
+                    setMediaPickerOpen(true);
+                  }}
+                  className="px-3 py-2 text-sm bg-primary-500 text-white rounded hover:bg-primary-600"
+                >
+                  Change Image
+                </button>
+              </div>
+            ) : (
+              <div className="text-center">
+                <ImgIcon className="mx-auto text-primary-300 mb-3" size={32} />
+                <p className="text-sm text-gray-600 mb-3">Set a thumbnail for your post</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMediaPickerMode("featured");
+                    setMediaPickerOpen(true);
+                  }}
+                  className="px-4 py-2 bg-primary-500 text-white rounded hover:bg-primary-600"
+                >
+                  Select Image
+                </button>
+              </div>
+            )}
+          </div>
+          {featuredImage && <input type="hidden" name="featuredImageId" value={featuredImage.id} />}
+        </div>
           <select
             {...register("categoryId")}
             className="w-full px-4 py-2 rounded-lg border border-primary-200 focus:border-primary-500 focus:outline-none"
@@ -183,10 +247,29 @@ export function NewPostForm({
         focusKeyword={watch("focusKeyword") ?? ""}
         seoTitle={seoTitle}
         metaDescription={metaDesc}
-        contentJson={contentJson as any}
+        contentJson={contentJson}
         isSaving={isSaving}
         onSeoScoreChange={setSeoScore}
         lastSavedAt={lastSavedAt}
+      />
+
+      <MediaPicker
+        open={mediaPickerOpen}
+        onClose={() => {
+          setMediaPickerOpen(false);
+          setMediaPickerCallback(null);
+        }}
+        onSelect={(item, altText) => {
+          if (mediaPickerMode === "editor" && mediaPickerCallback) {
+            mediaPickerCallback(item.url, altText);
+          } else if (mediaPickerMode === "featured") {
+            setFeaturedImage({ id: item.id, url: item.url, alt: altText });
+            dirtyRef.current = true;
+          }
+          setMediaPickerOpen(false);
+          setMediaPickerCallback(null);
+        }}
+        requireAltText={true}
       />
     </form>
   );

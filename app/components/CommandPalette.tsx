@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { Search, X } from "lucide-react";
 
@@ -10,9 +11,26 @@ interface CommandPaletteProps {
 
 export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   const ref = useRef<HTMLInputElement>(null);
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<Array<{ title: string; slug: string }>>([]);
+
   useEffect(() => {
     if (open) ref.current?.focus();
   }, [open]);
+
+  useEffect(() => {
+    if (!query) {
+      setResults([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+      const data = await res.json();
+      setResults(data.results || []);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+
   return (
     <AnimatePresence>
       {open && (
@@ -44,10 +62,28 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                 className="flex-1 outline-none text-lg bg-transparent"
                 placeholder="Search plant tips..."
                 aria-label="Search plant tips"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
               />
             </div>
             {/* نتائج البحث أو اقتراحات */}
-            <div className="text-gray-500 text-sm">Type to search for plant tips, articles, or categories...</div>
+            {results.length > 0 ? (
+              <ul className="mt-2 max-h-60 overflow-auto">
+                {results.map((post) => (
+                  <li key={post.slug}>
+                    <Link
+                      href={`/blog/${post.slug}`}
+                      className="block px-4 py-2 rounded hover:bg-primary-50 text-primary-700"
+                      onClick={onClose}
+                    >
+                      {post.title}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="text-gray-500 text-sm">Type to search for plant tips, articles, or categories...</div>
+            )}
           </motion.div>
         </motion.div>
       )}

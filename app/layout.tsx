@@ -2,8 +2,6 @@ import type { Metadata } from "next";
 import { Playfair_Display } from "next/font/google";
 import { Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
-import { Navbar } from "./components/Navbar";
-import { Footer } from "./components/Footer";
 
 const playfair = Playfair_Display({
   variable: "--font-heading",
@@ -30,9 +28,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${playfair.variable} ${jakarta.variable} antialiased bg-[#F9F9F9]`}>
-        <div className="min-h-screen">
-          {children}
-        </div>
+        {children}
       </body>
     </html>
   );

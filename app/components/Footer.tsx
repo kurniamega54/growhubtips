@@ -3,13 +3,14 @@ import { motion, AnimatePresence } from "framer-motion";
  import { Instagram, Youtube, ArrowUp } from "lucide-react";
 import clsx from "clsx";
 import { useState, useEffect } from "react";
+import { getSettings } from "@/app/admin/server-actions/settings";
 
-const gardeningLinks = [
-  { href: "/indoor-plants", label: "Indoor Plants" },
-  { href: "/vegetable-gardening", label: "Vegetable Gardening" },
-  { href: "/succulent-care", label: "Succulent Care" },
-  { href: "/plant-doctor", label: "Plant Doctor" },
-];
+interface CategoryLink { id: string; name: string; slug: string; }
+interface SocialLinks {
+  instagram?: string;
+  pinterest?: string;
+}
+
 const resourceLinks = [
   { href: "/about", label: "About Our Mission" },
   { href: "/contact", label: "Contact Expert Support" },
@@ -25,10 +26,34 @@ const trustBadges = [
 export function Footer() {
   const [showTop, setShowTop] = useState(false);
   const year = new Date().getFullYear();
+  const [categories, setCategories] = useState<CategoryLink[]>([]);
+  const [socialLinks, setSocialLinks] = useState<SocialLinks>({});
+
   useEffect(() => {
     const onScroll = () => setShowTop(window.scrollY > 120);
     window.addEventListener("scroll", onScroll);
     return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/categories")
+      .then((r) => r.json())
+      .then((d) => setCategories(d.categories || []))
+      .catch(() => setCategories([]));
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const settings = await getSettings();
+        setSocialLinks({
+          instagram: settings['instagram_url'] || undefined,
+          pinterest: settings['pinterest_url'] || undefined,
+        });
+      } catch (error) {
+        console.error('Failed to load social links:', error);
+      }
+    })();
   }, []);
 
   return (
@@ -54,37 +79,58 @@ export function Footer() {
           <div className="font-heading text-xl font-bold mb-2 leading-tight text-white">Empowering Urban Gardeners</div>
           <div className="text-sm mb-4 text-white">GrowHubTips helps you nurture your green thumb and thrive in any space.</div>
           <div className="flex gap-4 mt-2">
-            {[Instagram, Youtube].map((Icon, i) => (
+            {socialLinks.instagram && (
               <motion.a
-                key={i}
-                href="#"
-                aria-label={Icon.name}
+                href={socialLinks.instagram}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Instagram"
                 whileHover={{ scale: 1.18, y: -4 }}
                 className="bg-white rounded-full p-2 text-primary-500 hover:text-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500 shadow"
                 tabIndex={0}
                 style={{filter:'drop-shadow(0 2px 8px rgba(45,90,39,0.12))'}}
               >
-                <Icon size={22} />
+                <Instagram size={22} />
               </motion.a>
-            ))}
+            )}
+            {socialLinks.pinterest && (
+              <motion.a
+                href={socialLinks.pinterest}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Pinterest"
+                whileHover={{ scale: 1.18, y: -4 }}
+                className="bg-white rounded-full p-2 text-primary-500 hover:text-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500 shadow"
+                tabIndex={0}
+                style={{filter:'drop-shadow(0 2px 8px rgba(45,90,39,0.12))'}}
+              >
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                  <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2"/>
+                  <path d="M8 12c0-2.2 1.8-4 4-4s4 1.8 4 4-1.8 4-4 4-4-1.8-4-4z" fill="currentColor"/>
+                </svg>
+              </motion.a>
+            )}
           </div>
         </motion.div>
         {/* Column 2: Gardening Hub */}
         <motion.div variants={{ hidden: { opacity: 0, y: 40 }, visible: { opacity: 1, y: 0 } }}>
           <div className="font-heading text-lg font-semibold mb-4 text-white border-b border-white/20 pb-2">The Gardening Hub</div>
           <ul className="space-y-3">
-            {gardeningLinks.map((link) => (
-              <li key={link.href}>
-                <motion.a
-                  href={link.href}
-                  className="block text-white font-bold hover:text-accent-500 transition text-base"
-                  whileHover={{ x: 5 }}
-                  tabIndex={0}
-                >
-                  {link.label}
-                </motion.a>
-              </li>
-            ))}
+            {(categories.length > 0
+              ? categories.map((c) => ({ href: `/category/${c.slug}`, label: c.name }))
+              : [])
+              .map((link) => (
+                <li key={link.href}>
+                  <motion.a
+                    href={link.href}
+                    className="block text-white font-bold hover:text-accent-500 transition text-base"
+                    whileHover={{ x: 5 }}
+                    tabIndex={0}
+                  >
+                    {link.label}
+                  </motion.a>
+                </li>
+              ))}
           </ul>
         </motion.div>
         {/* Column 3: Resources & Trust */}

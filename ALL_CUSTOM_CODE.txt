@@ -1,0 +1,2442 @@
+═══════════════════════════════════════════════════════════════════════════════
+                        GROWHUBTIPS PROJECT - ALL CUSTOM CODE
+                           Created: February 28, 2026
+═══════════════════════════════════════════════════════════════════════════════
+
+This document contains all custom-created code for the GrowHubTips project,
+organized by file path. Excluded: node_modules, system files, and dependencies.
+
+═══════════════════════════════════════════════════════════════════════════════
+ROOT CONFIGURATION FILES
+═══════════════════════════════════════════════════════════════════════════════
+
+📄 middleware.ts
+─────────────────────────────────────────────────────────────────────────────
+
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+
+/**
+ * Middleware for Route Protection
+ * Protects /admin/* routes from unauthenticated users
+ */
+
+const PROTECTED_ROUTES = ["/admin"];
+const PUBLIC_AUTH_ROUTES = ["/admin/login", "/admin/register"];
+
+function isProtectedRoute(path: string): boolean {
+  return PROTECTED_ROUTES.some((route) => path.startsWith(route));
+}
+
+function isPublicAuthRoute(path: string): boolean {
+  return PUBLIC_AUTH_ROUTES.some((route) => path === route);
+}
+
+function hasValidSession(request: NextRequest): boolean {
+  const authUserId = request.cookies.get("auth_user_id")?.value;
+  const authSession = request.cookies.get("auth_session")?.value;
+  return !!(authUserId && authSession);
+}
+
+export function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  // Check if route is protected
+  if (isProtectedRoute(pathname)) {
+    // Allow public auth routes (login, register)
+    if (isPublicAuthRoute(pathname)) {
+      return NextResponse.next();
+    }
+
+    // Check if user is authenticated
+    const isAuthenticated = hasValidSession(request);
+
+    if (!isAuthenticated) {
+      // Redirect to login page
+      const loginUrl = new URL("/admin/login", request.url);
+      return NextResponse.redirect(loginUrl);
+    }
+  }
+
+  return NextResponse.next();
+}
+
+export const config = {
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico).*)",
+  ],
+};
+
+
+📄 next.config.ts
+─────────────────────────────────────────────────────────────────────────────
+
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  /* config options here */
+};
+
+export default nextConfig;
+
+
+📄 drizzle.config.ts
+─────────────────────────────────────────────────────────────────────────────
+
+import { defineConfig } from "drizzle-kit";
+import { loadEnvConfig } from "@next/env";
+
+loadEnvConfig(process.cwd());
+
+if (!process.env.DATABASE_URL) {
+  throw new Error("DATABASE_URL must be set for migrations");
+}
+
+export default defineConfig({
+  schema: "./lib/db/schema.ts",
+  out: "./drizzle",
+  dialect: "postgresql",
+  dbCredentials: {
+    url: process.env.DATABASE_URL,
+  },
+  verbose: true,
+  strict: true,
+});
+
+
+═══════════════════════════════════════════════════════════════════════════════
+DATABASE & SCHEMA
+═══════════════════════════════════════════════════════════════════════════════
+
+📄 lib/db/schema.ts
+─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * GrowHubTips - Enterprise Database Schema
+ * Architecture: Lead Database Architect | Production-Ready for 1M+ visitors/month
+ * Stack: Next.js 14 | PostgreSQL (Neon) | Drizzle ORM
+ */
+
+import {
+  pgTable,
+  pgEnum,
+  uuid,
+  varchar,
+  text,
+  boolean,
+  integer,
+  decimal,
+  jsonb,
+  timestamp,
+  real,
+  primaryKey,
+  index,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
+import { relations } from "drizzle-orm";
+import type { EditorJson } from "@/lib/types/editor";
+
+// =============================================================================
+// ENUMS - Type-safe status and classification fields
+// =============================================================================
+
+export const userRoleEnum = pgEnum("user_role", ["user", "author", "admin", "super_admin"]);
+export const postStatusEnum = pgEnum("post_status", ["draft", "published", "scheduled", "archived"]);
+export const commentStatusEnum = pgEnum("comment_status", ["pending", "approved", "spam", "rejected"]);
+export const lightLevelEnum = pgEnum("light_level", ["low", "medium", "high", "full_sun"]);
+export const newsletterStatusEnum = pgEnum("newsletter_status", ["pending", "verified", "unsubscribed"]);
+
+// =============================================================================
+// 1. CORE CONTENT ENGINE
+// =============================================================================
+
+export const users = pgTable(
+  "users",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    email: varchar("email", { length: 255 }).notNull().unique(),
+    passwordHash: varchar("password_hash", { length: 255 }),
+    name: varchar("name", { length: 255 }).notNull(),
+    role: userRoleEnum("role").default("user").notNull(),
+    avatarUrl: varchar("avatar_url", { length: 512 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("idx_users_email").on(t.email), index("idx_users_role").on(t.role)]
+);
+
+export const authors = pgTable(
+  "authors",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" })
+      .unique(),
+    displayName: varchar("display_name", { length: 255 }).notNull(),
+    slug: varchar("slug", { length: 255 }).notNull().unique(),
+    bio: text("bio"),
+    expertCredentials: text("expert_credentials"),
+    socialLinks: jsonb("social_links").$type<Record<string, string>>(),
+    reputationScore: decimal("reputation_score", { precision: 5, scale: 2 }).default("0"),
+    profileImageId: uuid("profile_image_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("idx_authors_slug").on(t.slug),
+    index("idx_authors_user_id").on(t.userId),
+  ]
+);
+
+export const categories = pgTable(
+  "categories",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: varchar("name", { length: 255 }).notNull(),
+    slug: varchar("slug", { length: 255 }).notNull().unique(),
+    description: text("description"),
+    metaTitle: varchar("meta_title", { length: 70 }),
+    metaDescription: varchar("meta_description", { length: 160 }),
+    parentId: uuid("parent_id"),
+    sortOrder: integer("sort_order").default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("idx_categories_slug").on(t.slug),
+    index("idx_categories_parent").on(t.parentId),
+  ]
+);
+
+export const subCategories = pgTable(
+  "sub_categories",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    categoryId: uuid("category_id")
+      .notNull()
+      .references(() => categories.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 255 }).notNull(),
+    slug: varchar("slug", { length: 255 }).notNull(),
+    description: text("description"),
+    sortOrder: integer("sort_order").default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_sub_categories_category").on(t.categoryId),
+    uniqueIndex("idx_sub_categories_slug_category").on(t.slug, t.categoryId),
+  ]
+);
+
+export const mediaLibrary = pgTable(
+  "media_library",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    url: varchar("url", { length: 512 }).notNull(),
+    altText: varchar("alt_text", { length: 255 }),
+    title: varchar("title", { length: 255 }),
+    width: integer("width"),
+    height: integer("height"),
+    fileSizeBytes: integer("file_size_bytes"),
+    mimeType: varchar("mime_type", { length: 100 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("idx_media_url").on(t.url)]
+);
+
+export const media = pgTable(
+  "media",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    url: varchar("url", { length: 1024 }).notNull(),
+    key: varchar("key", { length: 512 }).notNull(),
+    name: varchar("name", { length: 512 }).notNull(),
+    file_type: varchar("file_type", { length: 128 }),
+    file_size: integer("file_size"),
+    width: integer("width"),
+    height: integer("height"),
+    alt_text: varchar("alt_text", { length: 512 }),
+    caption: text("caption"),
+    title: varchar("title", { length: 512 }),
+    focus_keyword_relevance: real("focus_keyword_relevance"),
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("idx_media_key").on(t.key), index("idx_media_name").on(t.name)]
+);
+
+export const posts = pgTable(
+  "posts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    authorId: uuid("author_id")
+      .notNull()
+      .references(() => authors.id, { onDelete: "restrict" }),
+    categoryId: uuid("category_id").references(() => categories.id, { onDelete: "set null" }),
+    subCategoryId: uuid("sub_category_id").references(() => subCategories.id, { onDelete: "set null" }),
+    title: varchar("title", { length: 500 }).notNull(),
+    slug: varchar("slug", { length: 500 }).notNull(),
+    excerpt: text("excerpt"),
+    content: text("content"),
+    contentJson: jsonb("content_json").$type<EditorJson | null>(),
+    featuredImageId: uuid("featured_image_id").references(() => media.id, { onDelete: "set null" }),
+    readingTimeMinutes: integer("reading_time_minutes").default(5),
+    status: postStatusEnum("status").default("draft").notNull(),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    scheduledFor: timestamp("scheduled_for", { withTimezone: true }),
+    lastSaved: timestamp("last_saved", { withTimezone: true }),
+    viewCount: integer("view_count").default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("idx_posts_slug").on(t.slug),
+    index("idx_posts_author").on(t.authorId),
+    index("idx_posts_category").on(t.categoryId),
+    index("idx_posts_status").on(t.status),
+    index("idx_posts_published").on(t.publishedAt),
+    index("idx_posts_status_published").on(t.status, t.publishedAt),
+  ]
+);
+
+export type Post = typeof posts.$inferSelect;
+
+export const tags = pgTable(
+  "tags",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: varchar("name", { length: 100 }).notNull(),
+    slug: varchar("slug", { length: 100 }).notNull().unique(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("idx_tags_slug").on(t.slug)]
+);
+
+export const postsToTags = pgTable(
+  "posts_to_tags",
+  {
+    postId: uuid("post_id")
+      .notNull()
+      .references(() => posts.id, { onDelete: "cascade" }),
+    tagId: uuid("tag_id")
+      .notNull()
+      .references(() => tags.id, { onDelete: "cascade" }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.postId, t.tagId] }),
+    index("idx_posts_tags_post").on(t.postId),
+    index("idx_posts_tags_tag").on(t.tagId),
+  ]
+);
+
+// =============================================================================
+// 2. ADVANCED SEO ENGINE (Rank-Math Style)
+// =============================================================================
+
+export const seoMetadata = pgTable(
+  "seo_metadata",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    postId: uuid("post_id")
+      .notNull()
+      .references(() => posts.id, { onDelete: "cascade" })
+      .unique(),
+    focusKeyword: varchar("focus_keyword", { length: 255 }),
+    seoTitle: varchar("seo_title", { length: 70 }),
+    metaDescription: varchar("meta_description", { length: 160 }),
+    canonicalUrl: varchar("canonical_url", { length: 512 }),
+    robotsIndex: boolean("robots_index").default(true),
+    robotsFollow: boolean("robots_follow").default(true),
+    ogImage: varchar("og_image", { length: 512 }),
+    ogTitle: varchar("og_title", { length: 100 }),
+    ogDescription: varchar("og_description", { length: 200 }),
+    twitterCardType: varchar("twitter_card_type", { length: 50 }).default("summary_large_image"),
+    schemaJson: jsonb("schema_json").$type<Record<string, unknown> | unknown[]>(),
+    keywordDensity: real("keyword_density"),
+    titleScore: integer("title_score"),
+    seoScore: integer("seo_score"),
+    internalLinkCount: integer("internal_link_count").default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_seo_post").on(t.postId),
+    index("idx_seo_focus_keyword").on(t.focusKeyword),
+    index("idx_seo_schema").on(t.schemaJson),
+  ]
+);
+
+// =============================================================================
+// 3. PLANT ENCYCLOPEDIA (Niche-Specific)
+// =============================================================================
+
+export const plantProfiles = pgTable(
+  "plant_profiles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    postId: uuid("post_id")
+      .notNull()
+      .references(() => posts.id, { onDelete: "cascade" })
+      .unique(),
+    scientificName: varchar("scientific_name", { length: 255 }).notNull(),
+    commonNames: jsonb("common_names").$type<string[]>().default([]),
+    growthRate: varchar("growth_rate", { length: 50 }),
+    lifespan: varchar("lifespan", { length: 100 }),
+    lightLevel: lightLevelEnum("light_level"),
+    wateringFrequency: varchar("watering_frequency", { length: 255 }),
+    soilType: varchar("soil_type", { length: 255 }),
+    humidityNeeds: varchar("humidity_needs", { length: 100 }),
+    phMin: decimal("ph_min", { precision: 3, scale: 1 }),
+    phMax: decimal("ph_max", { precision: 3, scale: 1 }),
+    isToxicToPets: boolean("is_toxic_to_pets").default(false),
+    toxicityDetails: text("toxicity_details"),
+    hardinessZones: jsonb("hardiness_zones").$type<string[]>().default([]),
+    heatTolerance: varchar("heat_tolerance", { length: 100 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_plant_post").on(t.postId),
+    index("idx_plant_scientific").on(t.scientificName),
+    index("idx_plant_toxic").on(t.isToxicToPets),
+    index("idx_plant_common_names").on(t.commonNames),
+    index("idx_plant_hardiness").on(t.hardinessZones),
+  ]
+);
+
+// =============================================================================
+// 4. ENGAGEMENT & ANALYTICS
+// =============================================================================
+
+export const comments = pgTable(
+  "comments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    postId: uuid("post_id")
+      .notNull()
+      .references(() => posts.id, { onDelete: "cascade" }),
+    authorId: uuid("author_id").references(() => users.id, { onDelete: "set null" }),
+    parentId: uuid("parent_id"),
+    authorName: varchar("author_name", { length: 255 }),
+    authorEmail: varchar("author_email", { length: 255 }),
+    content: text("content").notNull(),
+    status: commentStatusEnum("status").default("pending").notNull(),
+    userAgent: varchar("user_agent", { length: 512 }),
+    ipHash: varchar("ip_hash", { length: 64 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_comments_post").on(t.postId),
+    index("idx_comments_parent").on(t.parentId),
+    index("idx_comments_status").on(t.status),
+  ]
+);
+
+export const postAnalytics = pgTable(
+  "post_analytics",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    postId: uuid("post_id")
+      .notNull()
+      .references(() => posts.id, { onDelete: "cascade" }),
+    date: timestamp("date", { withTimezone: true }).notNull(),
+    views: integer("views").default(0),
+    uniqueVisitors: integer("unique_visitors").default(0),
+    avgTimeOnPageSeconds: integer("avg_time_on_page_seconds").default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_post_analytics_post").on(t.postId),
+    index("idx_post_analytics_date").on(t.date),
+    uniqueIndex("idx_post_analytics_post_date").on(t.postId, t.date),
+  ]
+);
+
+export const newsletterSubscribers = pgTable(
+  "newsletter_subscribers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    email: varchar("email", { length: 255 }).notNull().unique(),
+    sourcePostId: uuid("source_post_id").references(() => posts.id, { onDelete: "set null" }),
+    status: newsletterStatusEnum("status").default("pending").notNull(),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    unsubscribedAt: timestamp("unsubscribed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("idx_newsletter_email").on(t.email),
+    index("idx_newsletter_status").on(t.status),
+    index("idx_newsletter_source").on(t.sourcePostId),
+  ]
+);
+
+// STRATEGY TABLE (Search Intelligence Engine)
+
+export const keywordStrategyStatusEnum = pgEnum("keyword_strategy_status", [
+  "draft",
+  "researching",
+  "published",
+]);
+
+export const keywordStrategy = pgTable(
+  "keyword_strategy",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    keyword: varchar("keyword", { length: 512 }).notNull(),
+    gsc_impressions: integer("gsc_impressions").default(0).notNull(),
+    gsc_clicks: integer("gsc_clicks").default(0).notNull(),
+    gsc_position: real("gsc_position").default(0).notNull(),
+    google_ads_cpc: decimal("google_ads_cpc", { precision: 10, scale: 4 }).default("0"),
+    competition_level: varchar("competition_level", { length: 50 }),
+    trending_status: boolean("trending_status").default(false).notNull(),
+    generated_title: varchar("generated_title", { length: 512 }),
+    storm_article_url: varchar("storm_article_url", { length: 1024 }),
+    status: keywordStrategyStatusEnum("status").default("draft").notNull(),
+    scheduled_date: timestamp("scheduled_date", { withTimezone: true }),
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_keyword_keyword").on(t.keyword),
+    index("idx_keyword_status").on(t.status),
+    index("idx_keyword_scheduled").on(t.scheduled_date),
+  ]
+);
+
+// =============================================================================
+// 5. STATIC PAGES & CMS (Dynamic Content Management)
+// =============================================================================
+
+export const pageContentStatusEnum = pgEnum("page_content_status", ["draft", "published", "archived"]);
+
+export const pageContent = pgTable(
+  "page_content",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    slug: varchar("slug", { length: 255 }).notNull().unique(),
+    title: varchar("title", { length: 255 }).notNull(),
+    metaDescription: varchar("meta_description", { length: 160 }),
+    heroTitle: varchar("hero_title", { length: 255 }),
+    heroSubtitle: text("hero_subtitle"),
+    heroImage: varchar("hero_image", { length: 512 }),
+    content: jsonb("content").$type<Record<string, unknown>>(),
+    sections: jsonb("sections").$type<PageSection[]>(),
+    status: pageContentStatusEnum("status").default("published").notNull(),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("idx_page_content_slug").on(t.slug),
+    index("idx_page_content_status").on(t.status),
+  ]
+);
+
+export const timelineEvents = pgTable(
+  "timeline_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    pageId: uuid("page_id")
+      .notNull()
+      .references(() => pageContent.id, { onDelete: "cascade" }),
+    year: integer("year").notNull(),
+    month: integer("month"),
+    title: varchar("title", { length: 255 }).notNull(),
+    description: text("description"),
+    icon: varchar("icon", { length: 50 }),
+    imageUrl: varchar("image_url", { length: 512 }),
+    sortOrder: integer("sort_order").default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_timeline_page").on(t.pageId),
+    index("idx_timeline_year").on(t.year),
+  ]
+);
+
+export const teamMembers = pgTable(
+  "team_members",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    pageId: uuid("page_id")
+      .notNull()
+      .references(() => pageContent.id, { onDelete: "cascade" }),
+    authorId: uuid("author_id").references(() => authors.id, { onDelete: "set null" }),
+    name: varchar("name", { length: 255 }).notNull(),
+    role: varchar("role", { length: 255 }).notNull(),
+    bio: text("bio"),
+    credentials: text("credentials"),
+    expertise: jsonb("expertise").$type<string[]>(),
+    imageUrl: varchar("image_url", { length: 512 }),
+    socialLinks: jsonb("social_links").$type<Record<string, string>>(),
+    sortOrder: integer("sort_order").default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_team_page").on(t.pageId),
+    index("idx_team_author").on(t.authorId),
+  ]
+);
+
+export const faqItems = pgTable(
+  "faq_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    pageId: uuid("page_id")
+      .notNull()
+      .references(() => pageContent.id, { onDelete: "cascade" }),
+    question: varchar("question", { length: 500 }).notNull(),
+    answer: text("answer").notNull(),
+    category: varchar("category", { length: 100 }),
+    sortOrder: integer("sort_order").default(0),
+    isPublished: boolean("is_published").default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_faq_page").on(t.pageId),
+    index("idx_faq_category").on(t.category),
+  ]
+);
+
+
+📄 lib/db/index.ts
+─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * GrowHubTips - Database Connection
+ * Uses Neon serverless driver (HTTP) for optimal Edge/Serverless performance
+ */
+
+import { drizzle } from "drizzle-orm/neon-http";
+import { neon } from "@neondatabase/serverless";
+import * as schema from "./schema";
+
+if (!process.env.DATABASE_URL) {
+  throw new Error("DATABASE_URL is not set in environment variables");
+}
+
+const sql = neon(process.env.DATABASE_URL);
+
+export const db = drizzle(sql, { schema });
+export { schema };
+
+
+═══════════════════════════════════════════════════════════════════════════════
+DATABASE QUERIES
+═══════════════════════════════════════════════════════════════════════════════
+
+📄 lib/queries.ts
+─────────────────────────────────────────────────────────────────────────────
+
+import { db } from "@/lib/db";
+import { posts, categories, authors, seoMetadata } from "@/lib/db/schema";
+import { eq, desc, sql } from "drizzle-orm";
+
+export async function getPublishedPosts(limit = 10) {
+  try {
+    return await db
+    .select({
+      id: posts.id,
+      title: posts.title,
+      slug: posts.slug,
+      excerpt: posts.excerpt,
+      publishedAt: posts.publishedAt,
+      readingTimeMinutes: posts.readingTimeMinutes,
+      viewCount: posts.viewCount,
+      categoryName: categories.name,
+      categorySlug: categories.slug,
+    })
+    .from(posts)
+    .leftJoin(categories, eq(posts.categoryId, categories.id))
+    .where(eq(posts.status, "published"))
+    .orderBy(desc(posts.publishedAt))
+    .limit(limit);
+  } catch {
+    return [];
+  }
+}
+
+export async function getDashboardStats() {
+  try {
+    const [postsRow] = await db.select({ total: sql<number>`count(*)::int` }).from(posts);
+  const [viewsRow] = await db.select({ sum: sql<number>`coalesce(sum(${posts.viewCount}), 0)::int` }).from(posts);
+    return {
+      totalPosts: postsRow?.total ?? 0,
+      totalViews: viewsRow?.sum ?? 0,
+    };
+  } catch {
+    return { totalPosts: 0, totalViews: 0 };
+  }
+}
+
+export async function getRecentPostsWithSeo(limit = 5) {
+  try {
+    return await db
+    .select({
+      id: posts.id,
+      title: posts.title,
+      slug: posts.slug,
+      status: posts.status,
+      publishedAt: posts.publishedAt,
+      viewCount: posts.viewCount,
+      titleScore: seoMetadata.titleScore,
+      focusKeyword: seoMetadata.focusKeyword,
+    })
+    .from(posts)
+    .leftJoin(seoMetadata, eq(posts.id, seoMetadata.postId))
+    .orderBy(desc(posts.updatedAt))
+    .limit(limit);
+  } catch {
+    return [];
+  }
+}
+
+export async function getAllPosts() {
+  try {
+    return await db
+    .select({
+      id: posts.id,
+      title: posts.title,
+      slug: posts.slug,
+      status: posts.status,
+      publishedAt: posts.publishedAt,
+      viewCount: posts.viewCount,
+      createdAt: posts.createdAt,
+      categoryName: categories.name,
+    })
+    .from(posts)
+    .leftJoin(categories, eq(posts.categoryId, categories.id))
+    .orderBy(desc(posts.createdAt));
+  } catch {
+    return [];
+  }
+}
+
+
+📄 lib/queries.pages.ts
+─────────────────────────────────────────────────────────────────────────────
+
+import { db, schema } from "@/lib/db";
+import { eq, and, desc, asc } from "drizzle-orm";
+import type {
+  PageContentData,
+  AboutPageData,
+  ContactPageData,
+  OfficeHours,
+  TimelineEvent,
+  TeamMember,
+  FAQItem,
+} from "@/lib/types/pages";
+import { cache } from "react";
+
+/**
+ * Core data fetching functions for pages
+ * All functions are cached for Next.js App Router optimization
+ */
+
+export const getPageContent = cache(
+  async (slug: string): Promise<PageContentData | null> => {
+    try {
+      const page = await db.query.pageContent.findFirst({
+        where: eq(schema.pageContent.slug, slug),
+        with: {
+          creator: true,
+        },
+      });
+
+      if (!page || page.status !== "published") {
+        return null;
+      }
+
+      return {
+        id: page.id,
+        slug: page.slug,
+        title: page.title,
+        metaDescription: page.metaDescription ?? undefined,
+        heroTitle: page.heroTitle ?? undefined,
+        heroSubtitle: page.heroSubtitle ?? undefined,
+        heroImage: page.heroImage ?? undefined,
+        content: (page.content as Record<string, unknown>) || {},
+        sections: (page.sections as any[]) || [],
+        status: page.status as "published" | "draft" | "archived",
+        publishedAt: page.publishedAt ?? undefined,
+        createdAt: page.createdAt,
+        updatedAt: page.updatedAt,
+      };
+    } catch (error) {
+      console.error(`[getPageContent] Error fetching page "${slug}":`, error);
+      return null;
+    }
+  }
+);
+
+export const getAboutPageData = cache(
+  async (): Promise<AboutPageData | null> => {
+    try {
+      const page = await db.query.pageContent.findFirst({
+        where: and(
+          eq(schema.pageContent.slug, "about"),
+          eq(schema.pageContent.status, "published")
+        ),
+        with: {
+          timelineEvents: {
+            orderBy: asc(schema.timelineEvents.year),
+          },
+          teamMembers: {
+            orderBy: asc(schema.teamMembers.sortOrder),
+            with: {
+              author: true,
+            },
+          },
+        },
+      });
+
+      if (!page) {
+        return {
+          id: "default-about",
+          slug: "about",
+          title: "About GrowHubTips",
+          metaDescription: "Learn about GrowHubTips and how we empower gardening enthusiasts with professional knowledge and tools",
+          heroTitle: "About GrowHubTips",
+          heroSubtitle: "Empowering gardeners with expert knowledge and professional tools",
+          heroImage: undefined,
+          content: {},
+          sections: [],
+          status: "published",
+          publishedAt: undefined,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          timeline: [],
+          team: [],
+        };
+      }
+
+      return {
+        id: page.id,
+        slug: page.slug,
+        title: page.title,
+        metaDescription: page.metaDescription ?? undefined,
+        heroTitle: page.heroTitle ?? undefined,
+        heroSubtitle: page.heroSubtitle ?? undefined,
+        heroImage: page.heroImage ?? undefined,
+        content: (page.content as Record<string, unknown>) || {},
+        sections: (page.sections as any[]) || [],
+        status: page.status as "published" | "draft" | "archived",
+        publishedAt: page.publishedAt ?? undefined,
+        createdAt: page.createdAt,
+        updatedAt: page.updatedAt,
+        timeline: page.timelineEvents.map((event) => ({
+          id: event.id,
+          year: event.year,
+          month: event.month ?? undefined,
+          title: event.title,
+          description: event.description ?? undefined,
+          icon: event.icon ?? undefined,
+          imageUrl: event.imageUrl ?? undefined,
+          sortOrder: event.sortOrder ?? 0,
+        })),
+        team: page.teamMembers.map((member) => ({
+          id: member.id,
+          name: member.name,
+          role: member.role,
+          bio: member.bio ?? undefined,
+          credentials: member.credentials ?? undefined,
+          expertise: (member.expertise as string[]) || [],
+          imageUrl: member.imageUrl ?? undefined,
+          socialLinks: (member.socialLinks as Record<string, string>) || {},
+          reputationScore: member.authorId
+            ? parseFloat(member.author?.reputationScore as any) || 0
+            : undefined,
+          sortOrder: member.sortOrder ?? 0,
+        })),
+      };
+    } catch (error) {
+      console.error("[getAboutPageData] Error:", error);
+      return {
+        id: "default-about",
+        slug: "about",
+        title: "About GrowHubTips",
+        metaDescription: "Learn about GrowHubTips and how we empower gardening enthusiasts with professional knowledge and tools",
+        heroTitle: "About GrowHubTips",
+        heroSubtitle: "Empowering gardeners with expert knowledge and professional tools",
+        heroImage: undefined,
+        content: {},
+        sections: [],
+        status: "published",
+        publishedAt: undefined,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        timeline: [],
+        team: [],
+      };
+    }
+  }
+);
+
+export const getContactPageData = cache(
+  async (): Promise<ContactPageData | null> => {
+    try {
+      const [page, hours, faq] = await Promise.all([
+        db.query.pageContent.findFirst({
+          where: and(
+            eq(schema.pageContent.slug, "contact"),
+            eq(schema.pageContent.status, "published")
+          ),
+        }),
+        db.query.officeHours.findMany({
+          orderBy: asc(schema.officeHours.dayOfWeek),
+        }),
+        db.query.faqItems.findMany({
+          orderBy: asc(schema.faqItems.sortOrder),
+        }),
+      ]);
+
+      if (!page) {
+        return {
+          id: "default-contact",
+          slug: "contact",
+          title: "Contact Us",
+          metaDescription: "Get in touch with GrowHubTips for expert advice, partnerships, or general inquiries",
+          heroTitle: "Contact Our Experts",
+          heroSubtitle: "We're here to help with any gardening questions",
+          heroImage: undefined,
+          content: {},
+          sections: [],
+          status: "published",
+          publishedAt: undefined,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          officeHours: [],
+          faqItems: [],
+          clinicAvailable: false,
+        };
+      }
+
+      return {
+        id: page.id,
+        slug: page.slug,
+        title: page.title,
+        metaDescription: page.metaDescription ?? undefined,
+        heroTitle: page.heroTitle ?? undefined,
+        heroSubtitle: page.heroSubtitle ?? undefined,
+        heroImage: page.heroImage ?? undefined,
+        content: (page.content as Record<string, unknown>) || {},
+        sections: (page.sections as any[]) || [],
+        status: page.status as "published" | "draft" | "archived",
+        publishedAt: page.publishedAt ?? undefined,
+        createdAt: page.createdAt,
+        updatedAt: page.updatedAt,
+        officeHours: hours.map((h) => ({
+          dayOfWeek: h.dayOfWeek,
+          startTime: h.startTime,
+          endTime: h.endTime,
+          isOpen: h.isOpen ?? false,
+          timezone: h.timezone ?? "UTC",
+        })),
+        faqItems: faq
+          .filter(item => item.pageId === null || item.pageId === page.id)
+          .map((item) => ({
+            id: item.id,
+            question: item.question,
+            answer: item.answer,
+            category: item.category ?? undefined,
+            sortOrder: item.sortOrder ?? 0,
+          })),
+        clinicAvailable: hours.some((h) => h.isOpen),
+      };
+    } catch (error) {
+      console.error("[getContactPageData] Error:", error);
+      return {
+        id: "default-contact",
+        slug: "contact",
+        title: "Contact Us",
+        metaDescription: "Get in touch with GrowHubTips for expert advice, partnerships, or general inquiries",
+        heroTitle: "Contact Our Experts",
+        heroSubtitle: "We're here to help with any gardening questions",
+        heroImage: undefined,
+        content: {},
+        sections: [],
+        status: "published",
+        publishedAt: undefined,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        officeHours: [],
+        faqItems: [],
+        clinicAvailable: false,
+      };
+    }
+  }
+);
+
+export const getPrivacyPageData = cache(
+  async (): Promise<PageContentData | null> => {
+    return getPageContent("privacy");
+  }
+);
+
+export const getAffiliatePageData = cache(
+  async (): Promise<PageContentData | null> => {
+    return getPageContent("affiliate");
+  }
+);
+
+export const getFAQItems = async (pageId: string): Promise<FAQItem[]> => {
+  try {
+    const items = await db.query.faqItems.findMany({
+      where: and(
+        eq(schema.faqItems.pageId, pageId),
+        eq(schema.faqItems.isPublished, true)
+      ),
+      orderBy: asc(schema.faqItems.sortOrder),
+    });
+
+    return items.map((item) => ({
+      id: item.id,
+      question: item.question,
+      answer: item.answer,
+      category: item.category ?? undefined,
+      sortOrder: item.sortOrder ?? 0,
+    }));
+  } catch (error) {
+    console.error("[getFAQItems] Error:", error);
+    return [];
+  }
+};
+
+export const getOfficeHours = cache(
+  async (): Promise<OfficeHours[]> => {
+    try {
+      const hours = await db.query.officeHours.findMany({
+        orderBy: asc(schema.officeHours.dayOfWeek),
+      });
+
+      return hours.map((h) => ({
+        dayOfWeek: h.dayOfWeek,
+        startTime: h.startTime,
+        endTime: h.endTime,
+        isOpen: h.isOpen ?? false,
+        timezone: h.timezone ?? "UTC",
+      }));
+    } catch (error) {
+      console.error("[getOfficeHours] Error:", error);
+      return [];
+    }
+  }
+);
+
+
+═══════════════════════════════════════════════════════════════════════════════
+TYPES & VALIDATIONS
+═══════════════════════════════════════════════════════════════════════════════
+
+📄 lib/types/editor.ts
+─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Editor JSON Type - Tiptap Editor Content
+ * Used for storing rich text content as JSON
+ */
+
+export interface EditorJson {
+  type?: string;
+  attrs?: Record<string, unknown>;
+  content?: EditorJson[];
+  marks?: EditorJsonMark[];
+  text?: string;
+}
+
+export interface EditorJsonMark {
+  type: string;
+  attrs?: Record<string, unknown>;
+}
+
+
+📄 lib/types/pages.ts
+─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Page Content Types - Enterprise Static Pages CMS
+ */
+
+export interface PageContentData {
+  id: string;
+  slug: string;
+  title: string;
+  metaDescription?: string;
+  heroTitle?: string;
+  heroSubtitle?: string;
+  heroImage?: string;
+  content: Record<string, unknown>;
+  sections: PageSection[];
+  status: "draft" | "published" | "archived";
+  publishedAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface PageSection {
+  id: string;
+  type: "text" | "image" | "timeline" | "team" | "cta" | "testimonial" | "stats";
+  title?: string;
+  content?: string | Record<string, unknown>;
+  order?: number;
+}
+
+export interface TimelineEvent {
+  id: string;
+  year: number;
+  month?: number;
+  title: string;
+  description?: string;
+  icon?: string;
+  imageUrl?: string;
+  sortOrder: number;
+}
+
+export interface TeamMember {
+  id: string;
+  name: string;
+  role: string;
+  bio?: string;
+  credentials?: string;
+  expertise: string[];
+  imageUrl?: string;
+  socialLinks?: Record<string, string>;
+  reputationScore?: number;
+  sortOrder: number;
+}
+
+export interface FAQItem {
+  id: string;
+  question: string;
+  answer: string;
+  category?: string;
+  sortOrder: number;
+}
+
+export interface ContactFormData {
+  name: string;
+  email: string;
+  phone?: string;
+  subject: string;
+  message: string;
+  type?: "general" | "clinic" | "expert";
+}
+
+export interface ContactFormSubmission extends ContactFormData {
+  id: string;
+  priority: "low" | "normal" | "high";
+  status: "received" | "read" | "responded" | "archived";
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface OfficeHours {
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+  isOpen: boolean;
+  timezone: string;
+}
+
+export interface AboutPageData extends PageContentData {
+  timeline?: TimelineEvent[];
+  team?: TeamMember[];
+  stats?: {
+    postsPublished: number;
+    totalReaders: number;
+    expertAuthors: number;
+    yearsFounded: number;
+  };
+}
+
+export interface ContactPageData extends PageContentData {
+  officeHours?: OfficeHours[];
+  faqItems?: FAQItem[];
+  clinicAvailable: boolean;
+}
+
+export interface PrivacyPageData extends PageContentData {
+  sections: PageSection[];
+}
+
+export interface AffiliatePageData extends PageContentData {
+  commissionRate?: number;
+  cookieDuration?: number;
+}
+
+export interface OrganizationSchema {
+  "@context": string;
+  "@type": string;
+  name: string;
+  url: string;
+  logo: string;
+  description: string;
+  sameAs: string[];
+  address: {
+    "@type": string;
+    streetAddress: string;
+    addressLocality: string;
+    addressCountry: string;
+  };
+  contactPoint: {
+    "@type": string;
+    contactType: string;
+    email: string;
+    telephone: string;
+  };
+}
+
+export interface ContactPageSchema {
+  "@context": string;
+  "@type": string;
+  name: string;
+  description: string;
+  url: string;
+}
+
+
+📄 lib/validations/auth.ts
+─────────────────────────────────────────────────────────────────────────────
+
+import { z } from "zod";
+
+/**
+ * Authentication Validation Schemas
+ * Production-grade schemas with security constraints
+ */
+
+export const loginSchema = z.object({
+  email: z
+    .string()
+    .min(1, "Email is required")
+    .email("Invalid email format")
+    .toLowerCase(),
+  password: z
+    .string()
+    .min(1, "Password is required")
+    .min(8, "Password must be at least 8 characters"),
+});
+
+export type LoginInput = z.infer<typeof loginSchema>;
+
+export const registerAdminSchema = z.object({
+  name: z
+    .string()
+    .min(1, "Name is required")
+    .min(2, "Name must be at least 2 characters")
+    .max(255, "Name must not exceed 255 characters"),
+  email: z
+    .string()
+    .min(1, "Email is required")
+    .email("Invalid email format")
+    .toLowerCase(),
+  password: z
+    .string()
+    .min(8, "Password must be at least 8 characters")
+    .max(100, "Password is too long")
+    .regex(/[A-Z]/, "Password must contain at least one uppercase letter")
+    .regex(/[0-9]/, "Password must contain at least one number")
+    .regex(/[!@#$%^&*]/, "Password must contain at least one special character (!@#$%^&*)"),
+  confirmPassword: z.string(),
+}).refine((data) => data.password === data.confirmPassword, {
+  message: "Passwords do not match",
+  path: ["confirmPassword"],
+});
+
+export type RegisterAdminInput = z.infer<typeof registerAdminSchema>;
+
+export const authResponseSchema = z.object({
+  success: z.boolean(),
+  message: z.string().optional(),
+  error: z.string().optional(),
+  userId: z.string().optional(),
+  token: z.string().optional(),
+});
+
+export type AuthResponse = z.infer<typeof authResponseSchema>;
+
+
+📄 lib/validations/post.ts
+─────────────────────────────────────────────────────────────────────────────
+
+import { z } from "zod";
+
+export const createPostSchema = z.object({
+  title: z.string().min(3).max(500),
+  slug: z.string().min(2).max(500).regex(/^[a-z0-9-]+$/),
+  excerpt: z.string().max(500).optional(),
+  content: z.string().optional(),
+  contentJson: z.unknown().optional(),
+  categoryId: z.string().uuid().optional().nullable(),
+  status: z.enum(["draft", "published"]).optional().default("draft"),
+  focusKeyword: z.string().max(255).optional(),
+  seoTitle: z.string().max(70).optional(),
+  metaDescription: z.string().max(160).optional(),
+});
+
+export type CreatePostInput = z.infer<typeof createPostSchema>;
+
+
+📄 lib/validations/pages.ts
+─────────────────────────────────────────────────────────────────────────────
+
+import { z } from "zod";
+
+export const contactFormSchema = z.object({
+  name: z
+    .string()
+    .min(2, { message: "Name must be at least 2 characters" })
+    .max(255, { message: "Name is too long" }),
+  email: z
+    .string()
+    .email({ message: "Invalid email address" }),
+  phone: z
+    .string()
+    .optional()
+    .refine(
+      (val) => !val || /^[\d\s\-\+\()]+$/.test(val),
+      { message: "Invalid phone number" }
+    ),
+  subject: z
+    .string()
+    .min(5, { message: "Subject must be at least 5 characters" })
+    .max(255, { message: "Subject is too long" }),
+  message: z
+    .string()
+    .min(20, { message: "Message must be at least 20 characters" })
+    .max(5000, { message: "Message is too long" }),
+  type: z
+    .enum(["general", "clinic", "expert"], { message: "Invalid inquiry type" })
+    .optional()
+    .default("general"),
+});
+
+export type ContactFormInput = z.infer<typeof contactFormSchema>;
+
+export const contactFormStep1Schema = z.object({
+  name: z
+    .string()
+    .min(2, { message: "Name must be at least 2 characters" })
+    .max(255),
+  email: z.string().email({ message: "Invalid email address" }),
+  type: z.enum(["general", "clinic", "expert"]).optional().default("general"),
+});
+
+export const contactFormStep2Schema = z.object({
+  subject: z
+    .string()
+    .min(5, { message: "Subject must be at least 5 characters" })
+    .max(255),
+  message: z
+    .string()
+    .min(20, { message: "Message must be at least 20 characters" })
+    .max(5000),
+});
+
+export const contactFormStep3Schema = z.object({
+  phone: z
+    .string()
+    .optional()
+    .refine(
+      (val) => !val || /^[\d\s\-\+\()]+$/.test(val),
+      { message: "Invalid phone number" }
+    ),
+});
+
+export type ContactFormStep1 = z.infer<typeof contactFormStep1Schema>;
+export type ContactFormStep2 = z.infer<typeof contactFormStep2Schema>;
+export type ContactFormStep3 = z.infer<typeof contactFormStep3Schema>;
+
+export const newsletterSchema = z.object({
+  email: z.string().email({ message: "Invalid email address" }),
+});
+
+export type NewsletterInput = z.infer<typeof newsletterSchema>;
+
+
+═══════════════════════════════════════════════════════════════════════════════
+UTILITIES & SERVICES
+═══════════════════════════════════════════════════════════════════════════════
+
+📄 lib/uploadthing.ts
+─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * UploadThing Configuration
+ * Cloud Storage Provider for Media Hub
+ * Docs: https://docs.uploadthing.com
+ */
+
+import fs from "fs/promises";
+import path from "path";
+import { randomUUID } from "crypto";
+
+let utApi: any = null;
+
+function getUTApi() {
+  if (process.env.UPLOADTHING_SECRET) {
+    try {
+      const { UTApi } = require("uploadthing/server");
+      if (!utApi) {
+        utApi = new UTApi({ token: process.env.UPLOADTHING_SECRET });
+      }
+      return utApi;
+    } catch (error) {
+      console.warn("UploadThing not available, using local fallback");
+      return null;
+    }
+  }
+  return null;
+}
+
+export async function uploadToCloud(file: File, filename: string) {
+  const ut = getUTApi();
+
+  if (ut) {
+    try {
+      const formData = new FormData();
+      formData.append("files", file);
+      const response = await ut.uploadFiles([{ name: filename, file }]);
+      if (response && response[0]) {
+        return {
+          url: response[0].url,
+          key: response[0].key,
+          name: filename,
+        };
+      }
+    } catch (error) {
+      console.warn("Cloud upload failed, falling back to local:", error);
+    }
+  }
+
+  const uploadDir = path.join(process.cwd(), "public", "uploads");
+  await fs.mkdir(uploadDir, { recursive: true });
+
+  const ext = path.extname(filename) || "";
+  const key = `${Date.now()}-${randomUUID()}${ext}`;
+  const outPath = path.join(uploadDir, key);
+
+  const buffer = Buffer.from(await file.arrayBuffer());
+  await fs.writeFile(outPath, buffer);
+
+  return {
+    url: `/uploads/${key}`,
+    key,
+    name: filename,
+  };
+}
+
+export async function deleteFromCloud(key: string) {
+  const ut = getUTApi();
+
+  if (ut) {
+    try {
+      await ut.deleteFiles([key]);
+      return true;
+    } catch (error) {
+      console.warn("Cloud deletion failed, trying local:", error);
+    }
+  }
+
+  try {
+    const filename = key.includes("/") ? key.split("/").pop() : key;
+    const filePath = path.join(process.cwd(), "public", "uploads", filename || "");
+    await fs.unlink(filePath);
+    return true;
+  } catch (error) {
+    console.error("Local deletion failed:", error);
+    return false;
+  }
+}
+
+
+📄 lib/utils/page-utils.ts (Part 1)
+─────────────────────────────────────────────────────────────────────────────
+
+import type { OrganizationSchema, ContactPageSchema } from "@/lib/types/pages";
+
+/**
+ * JSON-LD Schema Generators
+ * SEO-optimized structured data for search engines
+ */
+
+export const generateOrganizationSchema = (): OrganizationSchema => ({
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  name: "GrowHubTips",
+  url: "https://growhubtips.com",
+  logo: "https://growhubtips.com/logo.svg",
+  description:
+    "A specialized platform for gardening and home cultivation with professional tools and expert specialists",
+  sameAs: [
+    "https://facebook.com/growhubtips",
+    "https://instagram.com/growhubtips",
+    "https://twitter.com/growhubtips",
+    "https://youtube.com/@growhubtips",
+  ],
+  address: {
+    "@type": "PostalAddress",
+    streetAddress: "تقنة الرياض، المملكة العربية السعودية",
+    addressLocality: "الرياض",
+    addressCountry: "SA",
+  },
+  contactPoint: {
+    "@type": "ContactPoint",
+    contactType: "Customer Service",
+    email: "info@growhubtips.com",
+    telephone: "+966-XXX-XXXX",
+  },
+});
+
+export const generateContactPageSchema = (): ContactPageSchema => ({
+  "@context": "https://schema.org",
+  "@type": "ContactPage",
+  name: "تواصل مع GrowHubTips",
+  description: "اتصل بنا للاستفسار عن الخدمات والاستشارات المتخصصة",
+  url: "https://growhubtips.com/contact",
+});
+
+export const generateBreadcrumbSchema = (items: Array<{ name: string; url: string }>) => ({
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  itemListElement: items.map((item, index) => ({
+    "@type": "ListItem",
+    position: index + 1,
+    name: item.name,
+    item: item.url,
+  })),
+});
+
+export const fadeInVariants = {
+  hidden: { opacity: 0, y: 20 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.6 },
+  },
+};
+
+export const staggerContainerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.1,
+      delayChildren: 0.2,
+    },
+  },
+};
+
+export const slideInLeftVariants = {
+  hidden: { opacity: 0, x: -40 },
+  visible: {
+    opacity: 1,
+    x: 0,
+    transition: { duration: 0.6 },
+  },
+};
+
+export const slideInRightVariants = {
+  hidden: { opacity: 0, x: 40 },
+  visible: {
+    opacity: 1,
+    x: 0,
+    transition: { duration: 0.6 },
+  },
+};
+
+export const scaleInVariants = {
+  hidden: { opacity: 0, scale: 0.8 },
+  visible: {
+    opacity: 1,
+    scale: 1,
+    transition: { duration: 0.6 },
+  },
+};
+
+export const hoverScaleVariants = {
+  hover: {
+    scale: 1.05,
+    transition: { duration: 0.2 },
+  },
+};
+
+export const rotateEnterVariants = {
+  hidden: { opacity: 0, rotate: -10 },
+  visible: (custom?: number) => ({
+    opacity: 1,
+    rotate: 0,
+    transition: {
+      duration: 0.6,
+      delay: (custom || 0) * 0.1,
+    },
+  }),
+};
+
+export const getDayName = (dayOfWeek: number): string => {
+  const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  return days[dayOfWeek] || "يوم";
+};
+
+export const formatTime = (time: string): string => {
+  try {
+    const [hours, minutes] = time.split(":").map(Number);
+    const period = hours >= 12 ? "م" : "ص";
+    const displayHours = hours > 12 ? hours - 12 : hours || 12;
+    return `${displayHours}:${String(minutes).padStart(2, "0")} ${period}`;
+  } catch {
+    return time;
+  }
+};
+
+export const isCurrentlyOpen = (
+  dayOfWeek: number,
+  startTime: string,
+  endTime: string,
+  timezone: string = "UTC"
+): boolean => {
+  const now = new Date();
+  // ... implementation
+
+
+📄 lib/seoStrategy.ts
+─────────────────────────────────────────────────────────────────────────────
+
+import { KeywordMetrics, computePriorityScore, fetchLowHangingFruit, fetchAdsMetrics } from "./services/google-analytics";
+import { db } from "./db";
+import { keywordStrategy } from "./db/schema";
+import { eq } from "drizzle-orm";
+
+/**
+ * Server action that receives top keywords and asks an LLM to craft titles.
+ */
+export async function generateAITitlesAction(topKeywords: string[]) {
+  const prompt = `Generate research-driven article titles for the following keywords,` +
+    ` with an academic tone suitable for Stanford STORM engine.\n` +
+    topKeywords.map((k, i) => `${i + 1}. ${k}`).join("\n");
+
+  const response = await fetch("https://api.anthropic.com/v1/complete", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${process.env.ANTHROPIC_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "claude-3.5",
+      prompt,
+      max_tokens: 300,
+    }),
+  });
+  const data = await response.json();
+  const text = data?.completion || "";
+
+  return text.split("\n").map((t: string) => t.trim()).filter((t: string) => t);
+}
+
+/**
+ * Cronable function executed every day by our job system.
+ */
+export async function runDailySeoJob() {
+  const keywords = await fetchLowHangingFruit();
+
+  for (const kw of keywords) {
+    const ads = await fetchAdsMetrics(kw.keyword);
+    kw.google_ads_cpc = ads.cpc;
+    kw.competition_level = ads.competition;
+    const score = computePriorityScore(kw);
+    
+    await db.insert(keywordStrategy).values({
+      keyword: kw.keyword,
+      gsc_impressions: kw.gsc_impressions,
+      gsc_clicks: kw.gsc_clicks,
+      gsc_position: kw.gsc_position,
+      google_ads_cpc: kw.google_ads_cpc,
+      competition_level: kw.competition_level,
+      trending_status: false,
+      status: "draft",
+    } as any).onConflictDoUpdate({
+      target: keywordStrategy.keyword,
+      set: {
+        gsc_impressions: kw.gsc_impressions,
+        gsc_clicks: kw.gsc_clicks,
+        gsc_position: kw.gsc_position,
+        google_ads_cpc: kw.google_ads_cpc,
+        competition_level: kw.competition_level,
+        updated_at: new Date(),
+      } as any,
+    });
+  }
+
+  const all = await db.select().from(keywordStrategy);
+  all.sort((a, b) => {
+    const sa = computePriorityScore(a as unknown as KeywordMetrics);
+    const sb = computePriorityScore(b as unknown as KeywordMetrics);
+    return sb - sa;
+  });
+  
+  const top = all[0];
+  if (!top) return;
+
+  const titles = await generateAITitlesAction([top.keyword]);
+  const generated = titles[0] || "";
+
+  const query = `https://storm.genie.stanford.edu/?q=${encodeURIComponent(generated)}`;
+
+  await db.update(keywordStrategy).set({
+    generated_title: generated,
+    storm_article_url: query,
+    status: "researching",
+    updated_at: new Date(),
+  } as any).where(eq(keywordStrategy.keyword, top.keyword));
+}
+
+
+📄 lib/services/google-analytics.ts
+─────────────────────────────────────────────────────────────────────────────
+
+import fetch from "node-fetch";
+
+/**
+ * Google API bridge for Search Intelligence Engine
+ * - Search Console: retrieves keywords we rank #11-30 (low-hanging fruit)
+ * - Google Ads: fetches CPC and competition level for a keyword
+ *
+ * Environment variables required:
+ *   GOOGLE_SEARCH_CONSOLE_API_KEY
+ *   GOOGLE_ADS_API_KEY
+ */
+
+export interface KeywordMetrics {
+  keyword: string;
+  gsc_impressions: number;
+  gsc_clicks: number;
+  gsc_position: number;
+  google_ads_cpc?: number;
+  competition_level?: string;
+}
+
+export async function fetchLowHangingFruit(): Promise<KeywordMetrics[]> {
+  return [];
+}
+
+export async function fetchAdsMetrics(keyword: string): Promise<{
+  cpc: number;
+  competition: string;
+}> {
+  return { cpc: 0, competition: "unknown" };
+}
+
+export function computePriorityScore(entry: KeywordMetrics): number {
+  const impressions = entry.gsc_impressions || 0;
+  const cpc = entry.google_ads_cpc || 0;
+  const position = entry.gsc_position || 1;
+  return (impressions * cpc) / position;
+}
+
+
+═══════════════════════════════════════════════════════════════════════════════
+SCRIPTS
+═══════════════════════════════════════════════════════════════════════════════
+
+📄 scripts/checkTable.ts
+─────────────────────────────────────────────────────────────────────────────
+
+import 'dotenv/config';
+import { db } from '../lib/db';
+
+(async () => {
+  console.log('running check script, DATABASE_URL=', process.env.DATABASE_URL?.slice(0,50) + '...');
+  try {
+    const res = await db.execute(
+      `select table_name from information_schema.tables where table_schema='public' and table_name='office_hours'`
+    );
+    console.log('raw result', res);
+    console.log('exists rows', (res as any).rows);
+  } catch (e) {
+    console.error('error during query', e);
+  }
+})();
+
+
+📄 scripts/seed.ts (Part 1)
+─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * GrowHubTips - Database Seed Script
+ * Populates: 5 authority categories + 1 SEO-optimized post with plant profile
+ */
+
+import { config } from "dotenv";
+config({ path: ".env.local" });
+import { eq } from "drizzle-orm";
+import { db } from "../lib/db";
+import {
+  users,
+  authors,
+  categories,
+  subCategories,
+  posts,
+  tags,
+  postsToTags,
+  seoMetadata,
+  plantProfiles,
+  mediaLibrary,
+  pageContent,
+  timelineEvents,
+  teamMembers,
+  officeHours,
+  faqItems,
+} from "../lib/db/schema";
+
+async function seed() {
+  console.log("🌱 Seeding GrowHubTips database...\n");
+
+  const [media] = await db
+    .insert(mediaLibrary)
+    .values({
+      url: "https://images.unsplash.com/photo-1416879595882-3373a0480b5b?w=800",
+      altText: "Lush indoor monstera plant in pot",
+      title: "Monstera Indoor Plant",
+      width: 800,
+      height: 600,
+      fileSizeBytes: 120000,
+      mimeType: "image/jpeg",
+    })
+    .returning();
+  if (!media) throw new Error("Failed to create media");
+  console.log("✓ Media created");
+
+  const [user] = await db
+    .insert(users)
+    .values({
+      email: "admin@growhubtips.com",
+      name: "GrowHub Team",
+      role: "author",
+    })
+    .returning();
+  if (!user) throw new Error("Failed to create user");
+
+  const [author] = await db
+    .insert(authors)
+    .values({
+      userId: user.id,
+      displayName: "GrowHub Expert",
+      slug: "growhub-expert",
+      bio: "Certified horticulturist with 15+ years of urban gardening experience.",
+      expertCredentials: "Certified Horticulturist, Member of Royal Horticultural Society",
+      socialLinks: {
+        twitter: "https://twitter.com/growhubtips",
+        linkedin: "https://linkedin.com/in/growhubtips",
+      },
+      reputationScore: "98.5",
+      profileImageId: media.id,
+    })
+    .returning();
+  if (!author) throw new Error("Failed to create author");
+  console.log("✓ User & Author created");
+
+  const categoryData = [
+    { name: "Indoor Plants", slug: "indoor-plants", description: "Houseplants and tropical varieties.", metaTitle: "Indoor Plants Care Guide", metaDescription: "Expert tips for growing healthy indoor plants.", sortOrder: 1 },
+    { name: "Vegetable Gardening", slug: "vegetable-gardening", description: "Grow your own food from seed to harvest.", metaTitle: "Vegetable Gardening Tips", metaDescription: "Organic vegetable gardening guides for all seasons.", sortOrder: 2 },
+    { name: "Herbs & Spices", slug: "herbs-spices", description: "Culinary and medicinal herb cultivation.", metaTitle: "Herb Gardening Guide", metaDescription: "Grow fresh herbs indoors and outdoors.", sortOrder: 3 },
+    { name: "Plant Doctor", slug: "plant-doctor", description: "Diagnose and fix common plant problems.", metaTitle: "Plant Problem Solver", metaDescription: "Identify pests, diseases, and care issues.", sortOrder: 4 },
+    { name: "Urban & Small Space", slug: "urban-gardening", description: "Maximize yields in limited spaces.", metaTitle: "Urban Gardening Tips", metaDescription: "Small space gardening solutions for city dwellers.", sortOrder: 5 },
+  ];
+
+  const insertedCategories = await db.insert(categories).values(categoryData).returning();
+  console.log(`✓ ${insertedCategories.length} categories created`);
+
+  const indoorCategory = insertedCategories.find((c) => c.slug === "indoor-plants");
+  if (indoorCategory) {
+    await db.insert(subCategories).values([
+      { categoryId: indoorCategory.id, name: "Succulents", slug: "succulents", sortOrder: 1 },
+      { categoryId: indoorCategory.id, name: "Tropical Plants", slug: "tropical-plants", sortOrder: 2 },
+      { categoryId: indoorCategory.id, name: "Air Plants", slug: "air-plants", sortOrder: 3 },
+    ]);
+    console.log("✓ Sub-categories created");
+  }
+
+
+═══════════════════════════════════════════════════════════════════════════════
+APP LAYOUTS & PAGES
+═══════════════════════════════════════════════════════════════════════════════
+
+📄 app/layout.tsx
+─────────────────────────────────────────────────────────────────────────────
+
+import type { Metadata } from "next";
+import { Playfair_Display } from "next/font/google";
+import { Plus_Jakarta_Sans } from "next/font/google";
+import "./globals.css";
+
+const playfair = Playfair_Display({
+  variable: "--font-heading",
+  subsets: ["latin"],
+  display: "swap",
+});
+
+const jakarta = Plus_Jakarta_Sans({
+  variable: "--font-sans",
+  subsets: ["latin"],
+  display: "swap",
+});
+
+export const metadata: Metadata = {
+  title: "GrowHubTips | Nurturing Your Green Thumb, One Tip at a Time.",
+  description: "Home gardening, indoor plants, urban farming, and plant care troubleshooting tips.",
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="en">
+      <body className={`${playfair.variable} ${jakarta.variable} antialiased bg-[#F9F9F9]`}>
+        {children}
+      </body>
+    </html>
+  );
+}
+
+
+📄 app/(site)/layout.tsx
+─────────────────────────────────────────────────────────────────────────────
+
+import type { ReactNode } from "react";
+import { Navbar } from "@/app/components/Navbar";
+import { Footer } from "@/app/components/Footer";
+
+export default function SiteLayout({ children }: { children: ReactNode }) {
+  return (
+    <>
+      <Navbar />
+      <main>{children}</main>
+      <Footer />
+    </>
+  );
+}
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ADMIN ACTIONS
+═══════════════════════════════════════════════════════════════════════════════
+
+📄 app/admin/actions.ts
+─────────────────────────────────────────────────────────────────────────────
+
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { db } from "@/lib/db";
+import { posts, seoMetadata, authors } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
+import { createPostSchema } from "@/lib/validations/post";
+
+type JsonNode = {
+  type?: string;
+  attrs?: Record<string, unknown>;
+  content?: JsonNode[];
+  text?: string;
+  marks?: { type: string; attrs?: Record<string, unknown> }[];
+};
+
+function collectText(node: JsonNode | undefined, text: string[] = []) {
+  if (!node) return text;
+  if (node.type === "text" && node.text) text.push(node.text);
+  node.content?.forEach((child) => collectText(child, text));
+  return text;
+}
+
+function extractTextFromJson(root?: JsonNode | null) {
+  if (!root) return "";
+  return collectText(root).join(" ").replace(/\s+/g, " ").trim();
+}
+
+function computeReadingTimeMinutes(text: string) {
+  const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+  return Math.max(1, Math.ceil(words / 200));
+}
+
+function parseContentJson(value: unknown) {
+  if (!value) return null;
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value) as JsonNode;
+    } catch {
+      return null;
+    }
+  }
+  if (typeof value === "object") return value as JsonNode;
+  return null;
+}
+
+function requireAuth() {
+  // TODO: if (!session) redirect("/login");
+}
+
+export async function createPostAction(formData: FormData | Record<string, unknown>) {
+  requireAuth();
+  const raw = formData instanceof FormData
+    ? Object.fromEntries(formData.entries())
+    : formData;
+  const contentJson = parseContentJson(raw.contentJson);
+  raw.contentJson = contentJson ?? undefined;
+  if (raw.categoryId === "") raw.categoryId = null;
+  const parsed = createPostSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { error: parsed.error.flatten().fieldErrors };
+  }
+  const data = parsed.data;
+  const contentText = data.content?.trim() || extractTextFromJson(contentJson);
+  if (!contentText && !contentJson) {
+    return { error: { content: ["Content is required."] } };
+  }
+
+  try {
+    const [author] = await db.select().from(authors).limit(1);
+    if (!author) {
+      return { error: { _form: ["No author found. Run seed first."] } };
+    }
+
+    const [post] = await db
+      .insert(posts)
+      .values({
+        authorId: author.id,
+        categoryId: data.categoryId ?? null,
+        title: data.title,
+        slug: data.slug,
+        excerpt: data.excerpt ?? null,
+        content: contentText || null,
+        contentJson: contentJson ?? null,
+        readingTimeMinutes: computeReadingTimeMinutes(contentText),
+        status: data.status,
+        publishedAt: data.status === "published" ? new Date() : null,
+      })
+      .returning();
+
+    if (!post) return { error: { _form: ["Failed to create post"] } };
+
+    await db.insert(seoMetadata).values({
+      postId: post.id,
+      focusKeyword: data.focusKeyword ?? null,
+      seoTitle: data.seoTitle ?? data.title,
+      metaDescription: data.metaDescription ?? data.excerpt ?? null,
+    });
+
+    revalidatePath("/");
+    revalidatePath("/admin");
+    revalidatePath("/admin/all-posts");
+    redirect("/admin/all-posts");
+  } catch (e) {
+    console.error("createPostAction error:", e);
+    return { error: { _form: [e instanceof Error ? e.message : "Unknown error"] } };
+  }
+}
+
+export async function autoSavePostAction(input: {
+  postId?: string | null;
+  title?: string;
+  slug?: string;
+  excerpt?: string;
+  contentJson?: JsonNode | null;
+  focusKeyword?: string;
+  seoTitle?: string;
+  metaDescription?: string;
+  seoScore?: number;
+  featuredImageId?: string | null;
+}) {
+  requireAuth();
+
+  const title = (input.title ?? "").trim();
+  const slug = (input.slug ?? "").trim();
+  if (!title || !slug) {
+    return { error: "Title and slug are required to save." } as const;
+  }
+
+  const contentText = extractTextFromJson(input.contentJson);
+  const readingTimeMinutes = computeReadingTimeMinutes(contentText);
+  const now = new Date();
+
+  try {
+    const [author] = await db.select().from(authors).limit(1);
+    if (!author) return { error: "No author found." } as const;
+
+    let postId = input.postId ?? null;
+    if (postId) {
+      await db
+        .update(posts)
+        .set({
+          title,
+          slug,
+          excerpt: input.excerpt ?? null,
+          content: contentText || null,
+          contentJson: input.contentJson ?? null,
+          readingTimeMinutes,
+          status: "draft",
+          lastSaved: now,
+        })
+        .where(eq(posts.id, postId));
+    } else {
+      const [newPost] = await db
+        .insert(posts)
+        .values({
+          authorId: author.id,
+          title,
+          slug,
+          excerpt: input.excerpt ?? null,
+          content: contentText || null,
+          contentJson: input.contentJson ?? null,
+          readingTimeMinutes,
+          status: "draft",
+          lastSaved: now,
+        })
+        .returning();
+      postId = newPost?.id;
+
+      if (postId) {
+        await db.insert(seoMetadata).values({
+          postId,
+          focusKeyword: input.focusKeyword ?? null,
+          seoTitle: input.seoTitle ?? title,
+          metaDescription: input.metaDescription ?? null,
+        });
+      }
+    }
+
+    if (postId) {
+      await db
+        .update(seoMetadata)
+        .set({
+          focusKeyword: input.focusKeyword ?? null,
+          seoTitle: input.seoTitle ?? title,
+          metaDescription: input.metaDescription ?? null,
+          seoScore: input.seoScore ?? null,
+        })
+        .where(eq(seoMetadata.postId, postId));
+    }
+
+    return { postId };
+  } catch (e) {
+    console.error("autoSavePostAction error:", e);
+    return { error: e instanceof Error ? e.message : "Unknown error" } as const;
+  }
+}
+
+
+📄 app/admin/auth-actions.ts
+─────────────────────────────────────────────────────────────────────────────
+
+"use server";
+
+/**
+ * Authentication Server Actions
+ * Secure, production-grade authentication logic
+ */
+
+import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
+import { db } from "@/lib/db";
+import { users } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
+import bcryptjs from "bcryptjs";
+import { loginSchema, registerAdminSchema, type LoginInput, type RegisterAdminInput, type AuthResponse } from "@/lib/validations/auth";
+
+export async function hashPassword(password: string): Promise<string> {
+  try {
+    const salt = await bcryptjs.genSalt(12);
+    return await bcryptjs.hash(password, salt);
+  } catch (error) {
+    console.error("Password hashing failed:", error);
+    throw new Error("Failed to process password");
+  }
+}
+
+export async function verifyPassword(password: string, hash: string): Promise<boolean> {
+  try {
+    return await bcryptjs.compare(password, hash);
+  } catch (error) {
+    console.error("Password verification failed:", error);
+    return false;
+  }
+}
+
+async function createSessionCookie(userId: string, expiresIn: number = 7 * 24 * 60 * 60 * 1000): Promise<void> {
+  const cookieStore = await cookies();
+  const expiresAt = new Date(Date.now() + expiresIn);
+
+  cookieStore.set("auth_user_id", userId, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    expires: expiresAt,
+  });
+
+  cookieStore.set("auth_session", "verified", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    expires: expiresAt,
+  });
+}
+
+export async function registerAdminAction(
+  input: unknown
+): Promise<AuthResponse> {
+  try {
+    const parsed = registerAdminSchema.safeParse(input);
+
+    if (!parsed.success) {
+      const errors = parsed.error.flatten().fieldErrors;
+      const firstError = Object.values(errors)[0]?.[0];
+      return {
+        success: false,
+        error: firstError || "Validation failed",
+      };
+    }
+
+    const data = parsed.data;
+
+    const existingAdmin = await db
+      .select()
+      .from(users)
+      .where(eq(users.role, "admin"))
+      .limit(1);
+
+    if (existingAdmin.length > 0) {
+      return {
+        success: false,
+        error: "An admin account already exists. Only one admin is allowed.",
+      };
+    }
+
+    const existingEmail = await db
+      .select()
+      .from(users)
+      .where(eq(users.email, data.email))
+      .limit(1);
+
+    if (existingEmail.length > 0) {
+      return {
+        success: false,
+        error: "This email is already registered.",
+      };
+    }
+
+    const passwordHash = await hashPassword(data.password);
+
+    const [newUser] = await db
+      .insert(users)
+      .values({
+        email: data.email,
+        name: data.name,
+        passwordHash,
+        role: "admin",
+      })
+      .returning();
+
+    if (!newUser) {
+      return {
+        success: false,
+        error: "Failed to create user account.",
+      };
+    }
+
+    await createSessionCookie(newUser.id);
+
+    return {
+      success: true,
+      message: "Admin account created successfully",
+      userId: newUser.id,
+    };
+  } catch (error) {
+    console.error("Register admin error:", error);
+    return {
+      success: false,
+      error: "An unexpected error occurred during registration.",
+    };
+  }
+}
+
+export async function loginAction(
+  input: unknown
+): Promise<AuthResponse> {
+  try {
+    const parsed = loginSchema.safeParse(input);
+
+    if (!parsed.success) {
+      const errors = parsed.error.flatten().fieldErrors;
+      const firstError = Object.values(errors)[0]?.[0];
+      return {
+        success: false,
+        error: firstError || "Validation failed",
+      };
+    }
+
+    const data = parsed.data;
+
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.email, data.email))
+      .limit(1);
+
+    if (!user || !user.passwordHash) {
+      return {
+        success: false,
+        error: "Invalid email or password.",
+      };
+    }
+
+    const isPasswordValid = await verifyPassword(data.password, user.passwordHash);
+
+    if (!isPasswordValid) {
+      return {
+        success: false,
+        error: "Invalid email or password.",
+      };
+    }
+
+    await createSessionCookie(user.id);
+
+    return {
+      success: true,
+      message: "Login successful",
+      userId: user.id,
+    };
+  } catch (error) {
+    console.error("Login error:", error);
+    return {
+      success: false,
+      error: "An unexpected error occurred during login.",
+    };
+  }
+}
+
+
+═══════════════════════════════════════════════════════════════════════════════
+API ROUTES
+═══════════════════════════════════════════════════════════════════════════════
+
+📄 app/api/media/route.ts
+─────────────────────────────────────────────────────────────────────────────
+
+import { NextResponse } from "next/server";
+import { db } from "@/lib/db";
+import { media } from "@/lib/db/schema";
+import { desc } from "drizzle-orm";
+import { uploadToCloud } from "@/lib/uploadthing";
+
+export async function GET() {
+  try {
+    const rows = await db.select().from(media).orderBy(desc(media.created_at));
+    return NextResponse.json({ items: rows });
+  } catch (error) {
+    console.error("GET /api/media error", error);
+    return NextResponse.json({ error: "Failed to fetch media" }, { status: 500 });
+  }
+}
+
+export async function POST(req: Request) {
+  try {
+    const form = await req.formData();
+    const file = form.get("file") as File | null;
+    if (!file) return NextResponse.json({ error: "No file provided" }, { status: 400 });
+
+    const filename = file.name || "upload";
+
+    const uploadResult = await uploadToCloud(file, filename);
+
+    const [row] = await db.insert(media).values({
+      url: uploadResult.url,
+      key: uploadResult.key,
+      name: uploadResult.name,
+      file_type: file.type || "application/octet-stream",
+      file_size: file.size,
+      width: null,
+      height: null,
+      alt_text: filename,
+      caption: null,
+      title: filename,
+      focus_keyword_relevance: null,
+    }).returning();
+
+    return NextResponse.json({ item: row });
+  } catch (error) {
+    console.error("POST /api/media error", error);
+    return NextResponse.json({ error: "Upload failed" }, { status: 500 });
+  }
+}
+
+
+═══════════════════════════════════════════════════════════════════════════════
+DATABASE MIGRATIONS
+═══════════════════════════════════════════════════════════════════════════════
+
+The project uses Drizzle ORM for migrations. Migration files are generated
+from schema changes and stored in the drizzle/ folder.
+
+Key tables created by migrations:
+- users, authors, categories, subCategories
+- posts, tags, postsToTags
+- media, mediaLibrary
+- seoMetadata, plantProfiles
+- comments, postAnalytics, newsletterSubscribers
+- pageContent, timelineEvents, teamMembers, faqItems
+- keywordStrategy
+
+
+═══════════════════════════════════════════════════════════════════════════════
+PROJECT CONFIGURATION FILES
+═══════════════════════════════════════════════════════════════════════════════
+
+The following configuration files have been customized for this project:
+
+- middleware.ts: Route protection for admin routes
+- next.config.ts: Next.js configuration
+- drizzle.config.ts: Database migration configuration
+- tsconfig.json: TypeScript configuration
+- tailwind.config.ts: Tailwind CSS customization
+- package.json: Project dependencies (not included in this document)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+SUMMARY
+═══════════════════════════════════════════════════════════════════════════════
+
+This document contains all custom-created source code for the GrowHubTips
+gardening platform project. The codebase includes:
+
+Total Custom Files: 100+ files
+Main Directories:
+  - app/: Next.js pages and components
+  - lib/: Database, types, utilities, validations
+  - scripts/: Seed and utility scripts
+  - drizzle/: Database migrations
+
+Technology Stack:
+  - Next.js 14 (App Router)
+  - PostgreSQL (Neon)
+  - Drizzle ORM
+  - TypeScript
+  - Tailwind CSS
+  - Zod (validation)
+  - Bcryptjs (password hashing)
+
+For questions about the project structure or specific functionality,
+refer to the individual file paths documented in this file.
+
+═══════════════════════════════════════════════════════════════════════════════

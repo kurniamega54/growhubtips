@@ -1,5 +1,6 @@
 "use client";
 import { createContext, useState, useCallback } from "react";
+import type { EditorJson } from "@/lib/types/editor";
 
 export type EditorContextType = {
   title: string;
@@ -8,8 +9,8 @@ export type EditorContextType = {
   setSyncStatus: (s: string) => void;
   onPublish: () => void;
   onPreview: () => void;
-  contentJson: any;
-  setContentJson: (c: any) => void;
+  contentJson: EditorJson | null;
+  setContentJson: (c: EditorJson | null) => void;
   seoScore: number;
   setSeoScore: (n: number) => void;
 };
@@ -19,7 +20,7 @@ export const EditorContext = createContext<EditorContextType | undefined>(undefi
 export function EditorProvider({ children }: { children: React.ReactNode }) {
   const [title, setTitle] = useState("");
   const [syncStatus, setSyncStatus] = useState("🍃 Draft Saved");
-  const [contentJson, setContentJson] = useState<any>(null);
+  const [contentJson, setContentJson] = useState<EditorJson | null>(null);
   const [seoScore, setSeoScore] = useState(0);
 
   const onPublish = useCallback(() => {

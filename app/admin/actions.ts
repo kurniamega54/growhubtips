@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { posts, seoMetadata, authors } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { createPostSchema } from "@/lib/validations/post";
+import * as schema from "@/lib/db/schema";
 
 type JsonNode = {
   type?: string;
@@ -118,6 +119,7 @@ export async function autoSavePostAction(input: {
   seoTitle?: string;
   metaDescription?: string;
   seoScore?: number;
+  featuredImageId?: string | null;
 }) {
   requireAuth();
 
@@ -147,6 +149,7 @@ export async function autoSavePostAction(input: {
           contentJson: input.contentJson ?? null,
           readingTimeMinutes,
           status: "draft",
+          featuredImageId: input.featuredImageId ?? null,
           updatedAt: now,
         })
         .where(eq(posts.id, postId));
@@ -162,6 +165,7 @@ export async function autoSavePostAction(input: {
           contentJson: input.contentJson ?? null,
           readingTimeMinutes,
           status: "draft",
+          featuredImageId: input.featuredImageId ?? null,
           publishedAt: null,
         })
         .returning();
@@ -208,5 +212,58 @@ export async function deletePostAction(postId: string) {
   } catch (e) {
     console.error("deletePostAction error:", e);
     return { error: e instanceof Error ? e.message : "Failed to delete" };
+  }
+}
+
+/**
+ * Update page content (used by admin page editor)
+ */
+export async function updatePageContentAction(
+  slug: string,
+  contentJson: Record<string, unknown>,
+  title?: string
+) {
+  requireAuth();
+  try {
+    if (!slug || !contentJson) {
+      return { success: false, message: "Missing required parameters" };
+    }
+
+    const existing = await db.query.pageContent.findFirst({
+      where: eq(schema.pageContent.slug, slug),
+    });
+
+    if (existing) {
+      await db
+        .update(schema.pageContent)
+        .set({
+          content: contentJson,
+          title: title ?? existing.title,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.pageContent.slug, slug));
+
+      revalidatePath(`/${slug}`);
+      revalidatePath("/");
+
+      return { success: true, message: `Page '${slug}' updated` };
+    }
+
+    // If page does not exist, create a draft page
+    const [row] = await db.insert(schema.pageContent).values({
+      slug,
+      title: title ?? slug,
+      content: contentJson,
+      status: "draft",
+      publishedAt: null,
+    }).returning();
+
+    revalidatePath(`/${slug}`);
+    revalidatePath("/");
+
+    return { success: true, message: `Page '${slug}' created`, data: { id: row?.id } };
+  } catch (e) {
+    console.error("updatePageContentAction error:", e);
+    return { success: false, message: e instanceof Error ? e.message : "Failed to update page" };
   }
 }

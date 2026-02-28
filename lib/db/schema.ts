@@ -21,7 +21,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
-import type { EditorJson } from "@/src/types/editor";
+import type { EditorJson } from "@/lib/types/editor";
 
 // =============================================================================
 // ENUMS - Type-safe status and classification fields
@@ -134,6 +134,27 @@ export const mediaLibrary = pgTable(
   (t) => [index("idx_media_url").on(t.url)]
 );
 
+// New modern `media` table for DAM (cloud-native)
+export const media = pgTable(
+  "media",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    url: varchar("url", { length: 1024 }).notNull(),
+    key: varchar("key", { length: 512 }).notNull(), // storage key in cloud provider
+    name: varchar("name", { length: 512 }).notNull(),
+    file_type: varchar("file_type", { length: 128 }),
+    file_size: integer("file_size"),
+    width: integer("width"),
+    height: integer("height"),
+    alt_text: varchar("alt_text", { length: 512 }),
+    caption: text("caption"),
+    title: varchar("title", { length: 512 }),
+    focus_keyword_relevance: real("focus_keyword_relevance"),
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("idx_media_key").on(t.key), index("idx_media_name").on(t.name)]
+);
+
 export const posts = pgTable(
   "posts",
   {
@@ -148,7 +169,7 @@ export const posts = pgTable(
     excerpt: text("excerpt"),
     content: text("content"),
     contentJson: jsonb("content_json").$type<EditorJson | null>(),
-    featuredImageId: uuid("featured_image_id").references(() => mediaLibrary.id, { onDelete: "set null" }),
+    featuredImageId: uuid("featured_image_id").references(() => media.id, { onDelete: "set null" }),
     readingTimeMinutes: integer("reading_time_minutes").default(5),
     status: postStatusEnum("status").default("draft").notNull(),
     publishedAt: timestamp("published_at", { withTimezone: true }),
@@ -342,6 +363,203 @@ export const newsletterSubscribers = pgTable(
   ]
 );
 
+// -----------------------------------------------------------------------------
+// STRATEGY TABLE (Search Intelligence Engine)
+// -----------------------------------------------------------------------------
+
+export const keywordStrategyStatusEnum = pgEnum("keyword_strategy_status", [
+  "draft",
+  "researching",
+  "published",
+]);
+
+export const keywordStrategy = pgTable(
+  "keyword_strategy",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    keyword: varchar("keyword", { length: 512 }).notNull(),
+    gsc_impressions: integer("gsc_impressions").default(0).notNull(),
+    gsc_clicks: integer("gsc_clicks").default(0).notNull(),
+    gsc_position: real("gsc_position").default(0).notNull(),
+    google_ads_cpc: decimal("google_ads_cpc", { precision: 10, scale: 4 }).default("0"),
+    competition_level: varchar("competition_level", { length: 50 }),
+    trending_status: boolean("trending_status").default(false).notNull(),
+    generated_title: varchar("generated_title", { length: 512 }),
+    storm_article_url: varchar("storm_article_url", { length: 1024 }),
+    status: keywordStrategyStatusEnum("status").default("draft").notNull(),
+    scheduled_date: timestamp("scheduled_date", { withTimezone: true }),
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_keyword_keyword").on(t.keyword),
+    index("idx_keyword_status").on(t.status),
+    index("idx_keyword_scheduled").on(t.scheduled_date),
+  ]
+);
+
+
+// =============================================================================
+// 5. STATIC PAGES & CMS (Dynamic Content Management)
+// =============================================================================
+
+export const pageContentStatusEnum = pgEnum("page_content_status", ["draft", "published", "archived"]);
+
+export const pageContent = pgTable(
+  "page_content",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    slug: varchar("slug", { length: 255 }).notNull().unique(), // "about", "contact", "privacy", "affiliate"
+    title: varchar("title", { length: 255 }).notNull(),
+    metaDescription: varchar("meta_description", { length: 160 }),
+    heroTitle: varchar("hero_title", { length: 255 }),
+    heroSubtitle: text("hero_subtitle"),
+    heroImage: varchar("hero_image", { length: 512 }),
+    content: jsonb("content").$type<Record<string, unknown>>(), // Store complex content
+    sections: jsonb("sections").$type<PageSection[]>(),
+    status: pageContentStatusEnum("status").default("published").notNull(),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("idx_page_content_slug").on(t.slug),
+    index("idx_page_content_status").on(t.status),
+  ]
+);
+
+export const timelineEvents = pgTable(
+  "timeline_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    pageId: uuid("page_id")
+      .notNull()
+      .references(() => pageContent.id, { onDelete: "cascade" }),
+    year: integer("year").notNull(),
+    month: integer("month"),
+    title: varchar("title", { length: 255 }).notNull(),
+    description: text("description"),
+    icon: varchar("icon", { length: 50 }), // emoji or icon name
+    imageUrl: varchar("image_url", { length: 512 }),
+    sortOrder: integer("sort_order").default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_timeline_page").on(t.pageId),
+    index("idx_timeline_year").on(t.year),
+  ]
+);
+
+export const teamMembers = pgTable(
+  "team_members",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    pageId: uuid("page_id")
+      .notNull()
+      .references(() => pageContent.id, { onDelete: "cascade" }),
+    authorId: uuid("author_id").references(() => authors.id, { onDelete: "set null" }),
+    name: varchar("name", { length: 255 }).notNull(),
+    role: varchar("role", { length: 255 }).notNull(),
+    bio: text("bio"),
+    credentials: text("credentials"),
+    expertise: jsonb("expertise").$type<string[]>(),
+    imageUrl: varchar("image_url", { length: 512 }),
+    socialLinks: jsonb("social_links").$type<Record<string, string>>(),
+    sortOrder: integer("sort_order").default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_team_page").on(t.pageId),
+    index("idx_team_author").on(t.authorId),
+  ]
+);
+
+export const faqItems = pgTable(
+  "faq_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    pageId: uuid("page_id")
+      .notNull()
+      .references(() => pageContent.id, { onDelete: "cascade" }),
+    question: varchar("question", { length: 500 }).notNull(),
+    answer: text("answer").notNull(),
+    category: varchar("category", { length: 100 }),
+    sortOrder: integer("sort_order").default(0),
+    isPublished: boolean("is_published").default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_faq_page").on(t.pageId),
+    index("idx_faq_category").on(t.category),
+  ]
+);
+
+export const contactFormSubmissions = pgTable(
+  "contact_form_submissions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: varchar("name", { length: 255 }).notNull(),
+    email: varchar("email", { length: 255 }).notNull(),
+    phone: varchar("phone", { length: 20 }),
+    subject: varchar("subject", { length: 255 }).notNull(),
+    message: text("message").notNull(),
+    type: varchar("type", { length: 50 }).default("general"), // general, clinic, expert
+    priority: varchar("priority", { length: 50 }).default("normal"), // low, normal, high
+    status: varchar("status", { length: 50 }).default("received"), // received, read, responded, archived
+    ipAddress: varchar("ip_address", { length: 45 }),
+    userAgent: varchar("user_agent", { length: 512 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_contact_email").on(t.email),
+    index("idx_contact_status").on(t.status),
+    index("idx_contact_type").on(t.type),
+    index("idx_contact_created").on(t.createdAt),
+  ]
+);
+
+export const officeHours = pgTable(
+  "office_hours",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    dayOfWeek: integer("day_of_week").notNull(), // 0-6 (Sunday-Saturday)
+    startTime: varchar("start_time", { length: 5 }).notNull(), // "09:00"
+    endTime: varchar("end_time", { length: 5 }).notNull(), // "17:00"
+    isOpen: boolean("is_open").default(true),
+    timezone: varchar("timezone", { length: 50 }).default("UTC"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("idx_office_hours_day").on(t.dayOfWeek)]
+);
+
+export const siteSettings = pgTable(
+  "site_settings",
+  {
+    key: varchar("key", { length: 255 }).primaryKey(),
+    value: text("value"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("idx_site_settings_key").on(t.key)]
+);
+
+// =============================================================================
+// TYPE EXPORTS
+// =============================================================================
+
+export type PageSection = {
+  id: string;
+  type: "text" | "image" | "timeline" | "team" | "cta" | "testimonial" | "stats";
+  title?: string;
+  content?: string | Record<string, unknown>;
+};
+
 // =============================================================================
 // RELATIONS - Drizzle relations API
 // =============================================================================
@@ -371,7 +589,7 @@ export const postsRelations = relations(posts, ({ one, many }) => ({
   author: one(authors),
   category: one(categories),
   subCategory: one(subCategories),
-  featuredImage: one(mediaLibrary),
+  featuredImage: one(media),
   seoMetadata: one(seoMetadata),
   plantProfile: one(plantProfiles),
   tags: many(postsToTags),
@@ -414,3 +632,25 @@ export const newsletterSubscribersRelations = relations(newsletterSubscribers, (
 export const mediaLibraryRelations = relations(mediaLibrary, ({ many }) => ({
   posts: many(posts),
 }));
+
+export const pageContentRelations = relations(pageContent, ({ one, many }) => ({
+  creator: one(users),
+  timelineEvents: many(timelineEvents),
+  teamMembers: many(teamMembers),
+  faqItems: many(faqItems),
+}));
+
+export const timelineEventsRelations = relations(timelineEvents, ({ one }) => ({
+  page: one(pageContent),
+}));
+
+export const teamMembersRelations = relations(teamMembers, ({ one }) => ({
+  page: one(pageContent),
+  author: one(authors),
+}));
+
+export const faqItemsRelations = relations(faqItems, ({ one }) => ({
+  page: one(pageContent),
+}));
+
+export const contactFormSubmissionsRelations = relations(contactFormSubmissions, ({ one }) => ({}));

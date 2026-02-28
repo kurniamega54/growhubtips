@@ -1,0 +1,9 @@
+{
+  "cron": [
+    {
+      "path": "/api/cron",
+      "schedule": "0 0 * * *", // every 24h at midnight UTC
+      "timezone": "UTC"
+    }
+  ]
+}

@@ -1,34 +1,28 @@
 import { db } from "@/lib/db";
-import { posts, seoMetadata, categories } from "@/lib/db/schema";
+import { posts, categories } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { ContentRenderer } from "@/app/components/ContentRenderer";
+import RelatedPosts from "@/app/components/RelatedPosts";
+import { getMetadataForSlug } from "@/src/lib/seo-utils";
 
 type Props = { params: Promise<{ slug: string }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
-  const [row] = await db
-    .select({
-      title: posts.title,
-      excerpt: posts.excerpt,
-      seoTitle: seoMetadata.seoTitle,
-      metaDesc: seoMetadata.metaDescription,
-      ogImage: seoMetadata.ogImage,
-    })
-    .from(posts)
-    .leftJoin(seoMetadata, eq(posts.id, seoMetadata.postId))
-    .where(and(eq(posts.slug, slug), eq(posts.status, "published")));
+  const row = await getMetadataForSlug(slug);
 
-  if (!row) return { title: "Not Found" };
+  if (!row) {
+    return { title: "Not Found" };
+  }
 
   return {
     title: row.seoTitle ?? row.title,
-    description: row.metaDesc ?? row.excerpt ?? undefined,
+    description: row.metaDescription ?? row.excerpt ?? undefined,
     openGraph: {
       title: row.seoTitle ?? row.title,
-      description: row.metaDesc ?? row.excerpt ?? undefined,
+      description: row.metaDescription ?? row.excerpt ?? undefined,
       images: row.ogImage ? [row.ogImage] : undefined,
     },
   };
@@ -45,6 +39,7 @@ export default async function BlogPostPage({ params }: Props) {
       excerpt: posts.excerpt,
       publishedAt: posts.publishedAt,
       readingTimeMinutes: posts.readingTimeMinutes,
+      categoryId: posts.categoryId,
       categoryName: categories.name,
     })
     .from(posts)
@@ -72,7 +67,7 @@ export default async function BlogPostPage({ params }: Props) {
       </header>
       <div>
         {post.contentJson && typeof post.contentJson === "object" ? (
-          <ContentRenderer content={post.contentJson as any} />
+          <ContentRenderer content={post.contentJson} />
         ) : post.content ? (
           <div
             className="prose prose-lg prose-primary max-w-none"
@@ -81,6 +76,10 @@ export default async function BlogPostPage({ params }: Props) {
         ) : null}
       </div>
 
+      {/* related posts */}
+      {post.categoryId && (
+        <RelatedPosts currentPostId={post.id} categoryId={post.categoryId} />
+      )}
     </article>
   );
 }

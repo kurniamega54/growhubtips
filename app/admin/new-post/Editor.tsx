@@ -11,13 +11,13 @@ import { Table } from "@tiptap/extension-table";
 import { TableRow } from "@tiptap/extension-table-row";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { TableCell } from "@tiptap/extension-table-cell";
-import Suggestion from "@tiptap/suggestion";
 import { motion, AnimatePresence } from "framer-motion";
 import { SmartImage } from "@/lib/editor/extensions/SmartImage";
 import { PlantCareCard } from "@/lib/editor/extensions/PlantCareCard";
 import { GrowthTimeline } from "@/lib/editor/extensions/GrowthTimeline";
 import { ProTipCallout } from "@/lib/editor/extensions/ProTipCallout";
 import { EmbedBlock } from "@/lib/editor/extensions/EmbedBlock";
+import SlashSuggestion, { type BlockSuggestion, filterSuggestions } from "@/src/lib/editor/suggestions";
 import {
   Bold,
   Italic,
@@ -37,6 +37,8 @@ import {
   Lightbulb,
   Sprout,
   ListTree,
+  Search,
+  X,
 } from "lucide-react";
 
 export type EditorJson = Record<string, unknown>;
@@ -45,10 +47,14 @@ type EditorProps = {
   value?: EditorJson | null;
   onChange: (json: EditorJson) => void;
   placeholder?: string;
+  onOpenImagePicker?: (callback: (url: string, alt: string) => void) => void;
 };
 
-export function Editor({ value, onChange, placeholder }: EditorProps) {
+export function Editor({ value, onChange, placeholder, onOpenImagePicker }: EditorProps) {
   const [showBlockMenu, setShowBlockMenu] = useState(false);
+  const [blockSearchQuery, setBlockSearchQuery] = useState("");
+
+  const filteredSuggestions = filterSuggestions(blockSearchQuery);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -69,10 +75,7 @@ export function Editor({ value, onChange, placeholder }: EditorProps) {
       PlantCareCard,
       ProTipCallout,
       GrowthTimeline,
-        // Command Palette (Slash Menu)
-      // Command Palette (Slash Menu)
-      // Suggestion requires the editor instance in options
-      // We'll inject it after editor is created
+      SlashSuggestion(),
     ],
 
     content: value ?? undefined,
@@ -87,30 +90,6 @@ export function Editor({ value, onChange, placeholder }: EditorProps) {
       },
     },
   });
-
-  // Inject Suggestion extension with editor instance after creation
-  useEffect(() => {
-    if (!editor) return;
-    // Remove previous Suggestion extension if any
-    // @ts-ignore
-    editor.extensionManager.extensions = editor.extensionManager.extensions.filter(
-      (ext: any) => ext.name !== "suggestion"
-    );
-    // Add Suggestion extension with editor instance
-    // @ts-ignore
-    editor.extensionManager.extensions.push(
-      Suggestion({
-        editor,
-        char: '/',
-        command: ({ editor, range, props }) => {
-          // Custom block insertion logic
-        },
-      })
-    );
-    // Reconfigure extensions
-    // @ts-ignore
-    editor.view.setProps({});
-  }, [editor]);
 
   useEffect(() => {
     if (!editor || !value) return;
@@ -133,113 +112,98 @@ export function Editor({ value, onChange, placeholder }: EditorProps) {
     editor.chain().focus().extendMarkRange("link").setLink({ href: url }).run();
   };
 
-  const blockOptions = [
-    {
-      title: "Heading 1",
-      icon: <Heading1 size={16} />,
-      command: () => {
+  /**
+   * Execute block command based on suggestion type
+   */
+  const executeBlockCommand = (suggestion: BlockSuggestion) => {
+    // Delete the "/" and query text
+    // remove any leading slash trigger if present
+    const { $from } = editor.state.selection;
+    const { textContent } = $from.node();
+    const match = textContent.match(/^\/(.*)/);
+    if (match) {
+      const textToDelete = "/" + (match[1] || "");
+      editor.chain().deleteRange({ from: $from.start(), to: $from.start() + textToDelete.length }).focus().run();
+    }
+
+    // Execute the command
+    switch (suggestion.type) {
+      case "heading1":
         editor.chain().focus().setHeading({ level: 1 }).run();
-        setShowBlockMenu(false);
-      },
-    },
-    {
-      title: "Heading 2",
-      icon: <Heading2 size={16} />,
-      command: () => {
+        break;
+      case "heading2":
         editor.chain().focus().setHeading({ level: 2 }).run();
-        setShowBlockMenu(false);
-      },
-    },
-    {
-      title: "Heading 3",
-      icon: <Heading3 size={16} />,
-      command: () => {
+        break;
+      case "heading3":
         editor.chain().focus().setHeading({ level: 3 }).run();
-        setShowBlockMenu(false);
-      },
-    },
-    {
-      title: "Bullet List",
-      icon: <List size={16} />,
-      command: () => {
+        break;
+      case "bulletList":
         editor.chain().focus().toggleBulletList().run();
-        setShowBlockMenu(false);
-      },
-    },
-    {
-      title: "Numbered List",
-      icon: <ListOrdered size={16} />,
-      command: () => {
+        break;
+      case "orderedList":
         editor.chain().focus().toggleOrderedList().run();
-        setShowBlockMenu(false);
-      },
-    },
-    {
-      title: "Quote",
-      icon: <Quote size={16} />,
-      command: () => {
+        break;
+      case "quote":
         editor.chain().focus().toggleBlockquote().run();
-        setShowBlockMenu(false);
-      },
-    },
-    {
-      title: "Image",
-      icon: <Image size={16} />,
-      command: () => {
-        const url = window.prompt("Enter image URL");
-        if (url) {
-          editor.chain().focus().insertContent({ type: "smartImage", attrs: { src: url } }).run();
+        break;
+      case "image":
+        if (onOpenImagePicker) {
+          onOpenImagePicker((url: string, alt: string) => {
+            editor.chain().focus().insertContent({
+              type: "smartImage",
+              attrs: { src: url, alt: alt || "" },
+            }).run();
+          });
+        } else {
+          const url = window.prompt("Enter image URL");
+          if (url) {
+            editor.chain().focus().insertContent({
+              type: "smartImage",
+              attrs: { src: url },
+            }).run();
+          }
         }
-        setShowBlockMenu(false);
-      },
-    },
-    {
-      title: "Embed (YouTube/Instagram/X)",
-      icon: <Youtube size={16} />,
-      command: () => {
-        const url = window.prompt("Enter YouTube, Instagram, or X URL");
-        if (url) {
+        break;
+      case "embed":
+        const embedUrl = window.prompt("Enter YouTube, Instagram, or X URL");
+        if (embedUrl) {
           let platform = "youtube";
-          if (/instagram\.com/.test(url)) platform = "instagram";
-          if (/twitter\.com|x\.com/.test(url)) platform = "x";
-          editor.chain().focus().insertContent({ type: "embedBlock", attrs: { platform, url } }).run();
+          if (/instagram\.com/.test(embedUrl)) platform = "instagram";
+          if (/twitter\.com|x\.com/.test(embedUrl)) platform = "x";
+          editor.chain().focus().insertContent({
+            type: "embedBlock",
+            attrs: { platform, url: embedUrl },
+          }).run();
         }
-        setShowBlockMenu(false);
-      },
-    },
-    {
-      title: "Table",
-      icon: <TableIcon size={16} />,
-      command: () => {
-        editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
-        setShowBlockMenu(false);
-      },
-    },
-    {
-      title: "Plant Care Card",
-      icon: <Sprout size={16} />,
-      command: () => {
+        break;
+      case "table":
+        editor.chain().focus().insertTable({
+          rows: 3,
+          cols: 3,
+          withHeaderRow: true,
+        }).run();
+        break;
+      case "plantCareCard":
         editor.chain().focus().insertContent({ type: "plantCareCard" }).run();
-        setShowBlockMenu(false);
-      },
-    },
-    {
-      title: "Pro Tip",
-      icon: <Lightbulb size={16} />,
-      command: () => {
+        break;
+      case "proTip":
         editor.chain().focus().insertContent({ type: "proTipCallout" }).run();
-        setShowBlockMenu(false);
-      },
-    },
-    {
-      title: "Growth Timeline",
-      icon: <ListTree size={16} />,
-      command: () => {
+        break;
+      case "growthTimeline":
         editor.chain().focus().insertContent({ type: "growthTimeline" }).run();
-        setShowBlockMenu(false);
-      },
-    },
-  ];
+        break;
+    }
+
+    setShowBlockMenu(false);
+  };
+
+  // Register slash suggestion extension (renders separate tippy menu)
+  // Ensure extension is added only when editor exists
+  useEffect(() => {
+    if (!editor) return;
+    // add suggestion extension dynamically if not present
+    // Note: extensions are set on init; we included SlashSuggestion in the editor config directly
+  }, [editor]);
 
   return (
     <div className="rounded-3xl border border-primary-200 bg-white shadow-organic">
@@ -249,7 +213,9 @@ export function Editor({ value, onChange, placeholder }: EditorProps) {
           type="button"
           onClick={() => editor.chain().focus().toggleBold().run()}
           className={`p-2 rounded-lg transition ${
-            editor.isActive("bold") ? "bg-primary-100 text-primary-700" : "text-neutral-500 hover:bg-neutral-100"
+            editor.isActive("bold")
+              ? "bg-primary-100 text-primary-700"
+              : "text-neutral-500 hover:bg-neutral-100"
           }`}
           title="Bold"
         >
@@ -259,7 +225,9 @@ export function Editor({ value, onChange, placeholder }: EditorProps) {
           type="button"
           onClick={() => editor.chain().focus().toggleItalic().run()}
           className={`p-2 rounded-lg transition ${
-            editor.isActive("italic") ? "bg-primary-100 text-primary-700" : "text-neutral-500 hover:bg-neutral-100"
+            editor.isActive("italic")
+              ? "bg-primary-100 text-primary-700"
+              : "text-neutral-500 hover:bg-neutral-100"
           }`}
           title="Italic"
         >
@@ -269,7 +237,9 @@ export function Editor({ value, onChange, placeholder }: EditorProps) {
           type="button"
           onClick={() => editor.chain().focus().toggleUnderline().run()}
           className={`p-2 rounded-lg transition ${
-            editor.isActive("underline") ? "bg-primary-100 text-primary-700" : "text-neutral-500 hover:bg-neutral-100"
+            editor.isActive("underline")
+              ? "bg-primary-100 text-primary-700"
+              : "text-neutral-500 hover:bg-neutral-100"
           }`}
           title="Underline"
         >
@@ -279,7 +249,9 @@ export function Editor({ value, onChange, placeholder }: EditorProps) {
           type="button"
           onClick={() => editor.chain().focus().toggleHighlight().run()}
           className={`p-2 rounded-lg transition ${
-            editor.isActive("highlight") ? "bg-primary-100 text-primary-700" : "text-neutral-500 hover:bg-neutral-100"
+            editor.isActive("highlight")
+              ? "bg-primary-100 text-primary-700"
+              : "text-neutral-500 hover:bg-neutral-100"
           }`}
           title="Highlight"
         >
@@ -289,7 +261,9 @@ export function Editor({ value, onChange, placeholder }: EditorProps) {
           type="button"
           onClick={setLink}
           className={`p-2 rounded-lg transition ${
-            editor.isActive("link") ? "bg-primary-100 text-primary-700" : "text-neutral-500 hover:bg-neutral-100"
+            editor.isActive("link")
+              ? "bg-primary-100 text-primary-700"
+              : "text-neutral-500 hover:bg-neutral-100"
           }`}
           title="Link"
         >
@@ -304,9 +278,11 @@ export function Editor({ value, onChange, placeholder }: EditorProps) {
             type="button"
             onClick={() => setShowBlockMenu(!showBlockMenu)}
             className={`p-2 rounded-lg transition flex items-center gap-1 ${
-              showBlockMenu ? "bg-primary-100 text-primary-700" : "text-neutral-500 hover:bg-neutral-100"
+              showBlockMenu
+                ? "bg-primary-100 text-primary-700"
+                : "text-neutral-500 hover:bg-neutral-100"
             }`}
-            title="Insert block"
+            title="Insert block (or type '/' in editor)"
           >
             <Plus size={18} />
             <span className="text-sm font-medium">Block</span>
@@ -323,26 +299,55 @@ export function Editor({ value, onChange, placeholder }: EditorProps) {
                   exit={{ opacity: 0 }}
                 />
                 <motion.div
-                  className="absolute top-full left-0 mt-2 w-64 bg-white rounded-2xl border border-primary-200 shadow-organic overflow-hidden z-20"
+                  className="absolute top-full left-0 mt-2 w-80 bg-white rounded-2xl border border-primary-200 shadow-organic overflow-hidden z-20"
                   initial={{ opacity: 0, y: -8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -8 }}
                 >
-                  <div className="px-3 py-2 text-xs font-semibold text-primary-600 bg-primary-50">
-                    Insert Block
+                  <div className="px-3 py-2 flex items-center gap-2 border-b border-primary-100 bg-primary-50">
+                    <Search size={16} className="text-primary-600" />
+                    <input
+                      type="text"
+                      placeholder="Search blocks..."
+                      value={blockSearchQuery}
+                      onChange={(e) => setBlockSearchQuery(e.target.value)}
+                      className="flex-1 bg-transparent outline-none text-sm text-neutral-700 placeholder-neutral-400"
+                      autoFocus
+                    />
+                    {blockSearchQuery && (
+                      <button
+                        onClick={() => setBlockSearchQuery("")}
+                        className="p-1 hover:bg-primary-100 rounded transition"
+                      >
+                        <X size={14} className="text-neutral-500" />
+                      </button>
+                    )}
                   </div>
                   <div className="max-h-96 overflow-auto">
-                    {blockOptions.map((option, index) => (
-                      <button
-                        key={index}
-                        type="button"
-                        onClick={option.command}
-                        className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-primary-50 transition text-left"
-                      >
-                        <div className="text-primary-600">{option.icon}</div>
-                        <span className="text-sm font-medium text-neutral-700">{option.title}</span>
-                      </button>
-                    ))}
+                    {filteredSuggestions.length > 0 ? (
+                      filteredSuggestions.map((suggestion) => (
+                        <button
+                          key={suggestion.type}
+                          type="button"
+                          onClick={() => executeBlockCommand(suggestion)}
+                          className="w-full flex items-start gap-3 px-4 py-3 hover:bg-primary-50 transition text-left border-b border-primary-50 last:border-b-0"
+                        >
+                          <div className="text-2xl mt-0.5">{suggestion.icon}</div>
+                          <div className="flex-1">
+                            <div className="text-sm font-semibold text-neutral-800">
+                              {suggestion.label}
+                            </div>
+                            <div className="text-xs text-neutral-500">
+                              {suggestion.description}
+                            </div>
+                          </div>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="px-4 py-6 text-center text-sm text-neutral-400">
+                        No blocks found
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               </>
@@ -354,6 +359,8 @@ export function Editor({ value, onChange, placeholder }: EditorProps) {
       {/* Editor Content */}
       <div className="relative">
         <EditorContent editor={editor} />
+        
+        {/* Slash suggestion handled by SlashSuggestion extension (tippy + React menu) */}
       </div>
     </div>
   );
