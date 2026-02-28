@@ -69,10 +69,6 @@ export function Editor({ value, onChange, placeholder }: EditorProps) {
       PlantCareCard,
       ProTipCallout,
       GrowthTimeline,
-        // Command Palette (Slash Menu)
-      // Command Palette (Slash Menu)
-      // Suggestion requires the editor instance in options
-      // We'll inject it after editor is created
     ],
 
     content: value ?? undefined,
@@ -87,30 +83,6 @@ export function Editor({ value, onChange, placeholder }: EditorProps) {
       },
     },
   });
-
-  // Inject Suggestion extension with editor instance after creation
-  useEffect(() => {
-    if (!editor) return;
-    // Remove previous Suggestion extension if any
-    // @ts-ignore
-    editor.extensionManager.extensions = editor.extensionManager.extensions.filter(
-      (ext: any) => ext.name !== "suggestion"
-    );
-    // Add Suggestion extension with editor instance
-    // @ts-ignore
-    editor.extensionManager.extensions.push(
-      Suggestion({
-        editor,
-        char: '/',
-        command: ({ editor, range, props }) => {
-          // Custom block insertion logic
-        },
-      })
-    );
-    // Reconfigure extensions
-    // @ts-ignore
-    editor.view.setProps({});
-  }, [editor]);
 
   useEffect(() => {
     if (!editor || !value) return;

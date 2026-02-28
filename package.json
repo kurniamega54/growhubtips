@@ -11,7 +11,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "db:seed": "tsx scripts/seed.ts"
+    "db:seed": "export DATABASE_URL=$(npm run env | grep DATABASE_URL | cut -d= -f2-) && echo \"DATABASE_URL=$DATABASE_URL\" > .env.local && tsx scripts/seed.ts && rm .env.local"
   },
   "dependencies": {
     "@floating-ui/react": "^0.27.18",
@@ -58,6 +58,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }
